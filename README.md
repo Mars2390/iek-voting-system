@@ -46,26 +46,20 @@ IEK-VOTING-FULL/
 ├── images/
 │   ├── iek-logo.jpg           # Official IEK logo (used in the header)
 │   └── stariko-nyamori.jpg    # Candidate portrait (used on the candidate card)
-├── api/
+├── api/                      # 10 function files total — see "Serverless function count" below
 │   ├── _db.js                # Shared Neon connection (lazy-initialized)
 │   ├── _utils.js              # CORS, audit logging, IP extraction, error helper
 │   ├── _config.js             # Election window (start/end) + phase logic
-│   ├── engineers.js           # GET (list) / POST (create)
-│   ├── engineer.js            # PUT (update/vote) / DELETE — /api/engineers/:id
+│   ├── engineers.js           # GET/POST (collection) + PUT/DELETE via ?id= — /api/engineers[/:id]
+│   ├── candidates.js          # GET/POST (collection) + DELETE/vote via ?id=&vote= — /api/candidates[/:id[/vote]]
+│   ├── history.js             # Calls + remarks via ?kind=calls|remarks — /api/contact-calls, /api/remarks
+│   ├── reports.js             # Urgent + analytics via ?type=urgent|analytics — /api/urgent, /api/analytics
+│   ├── meta.js                # Audit log + election status via ?type=audit|status — /api/audit-log, /api/election-status
 │   ├── stats.js               # GET — total/voted/notVoted/turnout/needsFollowUp
 │   ├── reset-votes.js         # POST — reset all engineers to "not voted"
-│   ├── export.js              # GET — CSV download
+│   ├── export.js              # GET — CSV download, ?type=engineers|stats|candidates|calls|remarks
 │   ├── seed.js                # POST — insert the 8 sample engineers
-│   ├── import.js              # POST — bulk-add engineers from CSV text
-│   ├── election-status.js     # GET — phase (before/live/closed) + countdown targets
-│   ├── audit-log.js           # GET — recent audit trail (read-only)
-│   ├── candidates.js          # GET (list) / POST (add candidate)
-│   ├── candidate.js           # DELETE — /api/candidates/:id
-│   ├── candidate-vote.js      # POST — /api/candidates/:id/vote (+1 tallied vote)
-│   ├── contact-calls.js       # GET (history) / POST (log a call) — the only place contact_status changes
-│   ├── remarks.js             # GET (history) / POST (add an authored remark)
-│   ├── urgent.js              # GET — live-computed follow-up flags
-│   └── analytics.js           # GET — status distribution, daily calls/confirmations, turnout
+│   └── import.js              # POST — bulk-add engineers from CSV text
 ├── setup.js                  # One-command bootstrap: tables + seed + git push + deploy
 ├── fix-database.js           # Cleanup + clean re-import (see git history for context)
 ├── .env.example             # Template for required env vars (committed)
@@ -77,7 +71,18 @@ IEK-VOTING-FULL/
 └── README.md
 ```
 
-**Note on `api/engineer.js` / `api/candidate.js` / `api/candidate-vote.js`:** these were originally bracket-folder dynamic routes (`api/engineers/[id].js`, etc.), which is the standard Vercel convention — but they 404'd in production on this project. Rather than keep debugging Vercel's zero-config route detection, they were replaced with plain files plus explicit `vercel.json` rewrites (`/api/engineers/:id` → `/api/engineer?id=:id`) that don't depend on any bracket-notation auto-detection working. The browser-facing URLs are unchanged.
+**Note on dynamic routes:** `/api/engineers/:id`, `/api/candidates/:id`, `/api/candidates/:id/vote` etc. were originally separate bracket-folder files (`api/engineers/[id].js`) — the standard Vercel convention — but they 404'd in production on this project. Rather than keep debugging Vercel's zero-config route detection, they were folded into their collection file (`engineers.js`, `candidates.js`) with `vercel.json` rewrites forwarding the ID as a query parameter (`/api/engineers/:id` → `/api/engineers?id=:id`). Browser-facing URLs are unchanged either way.
+
+### Serverless function count (Vercel Hobby plan limit: 12)
+
+This project hit that limit directly: adding 4 new endpoints in one pass (16 total function files) silently dropped the newest 4 from deployment — no build error, just 404s on exactly those routes, because the build log doesn't necessarily surface a warning about it prominently. If you add more endpoints later and see the exact same "everything old still works, everything new 404s" symptom, **check the function count first** before assuming a code bug:
+
+```bash
+# Count actual function files (excludes _-prefixed helpers, which don't count):
+find api -maxdepth 1 -name "*.js" | grep -v "/_" | wc -l
+```
+
+Currently **10** (2 under the limit). The pattern used to consolidate here — one file per *resource*, dispatching on `req.query.id` for single-item ops and a `?type=`/`?kind=` marker for otherwise-unrelated GET reports, with `vercel.json` rewrites keeping the original URLs intact — is the way to add more without hitting this again. If you outgrow 12 functions even with consolidation, upgrading to a paid Vercel plan removes the limit.
 
 ---
 

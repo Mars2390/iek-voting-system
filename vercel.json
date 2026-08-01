@@ -4,9 +4,15 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/api/engineers/:id", "destination": "/api/engineer?id=:id" },
-    { "source": "/api/candidates/:id/vote", "destination": "/api/candidate-vote?id=:id" },
-    { "source": "/api/candidates/:id", "destination": "/api/candidate?id=:id" },
+    { "source": "/api/engineers/:id", "destination": "/api/engineers?id=:id" },
+    { "source": "/api/candidates/:id/vote", "destination": "/api/candidates?id=:id&vote=1" },
+    { "source": "/api/candidates/:id", "destination": "/api/candidates?id=:id" },
+    { "source": "/api/contact-calls", "destination": "/api/history?kind=calls" },
+    { "source": "/api/remarks", "destination": "/api/history?kind=remarks" },
+    { "source": "/api/urgent", "destination": "/api/reports?type=urgent" },
+    { "source": "/api/analytics", "destination": "/api/reports?type=analytics" },
+    { "source": "/api/audit-log", "destination": "/api/meta?type=audit" },
+    { "source": "/api/election-status", "destination": "/api/meta?type=status" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
