@@ -1,5 +1,6 @@
 import { getSql } from "../_db.js";
 import { applyCors, getClientIp, logAudit, sendError } from "../_utils.js";
+import { getElectionPhase } from "../_config.js";
 
 // PUT    /api/engineers/:id -> update name/phone/remarks and/or voted status
 // DELETE /api/engineers/:id -> remove an engineer
@@ -30,6 +31,20 @@ export default async function handler(req, res) {
       const nextRemarks = remarks !== undefined ? remarks : existing.remarks;
       const nextVoted = voted !== undefined ? Boolean(voted) : existing.voted;
       const votedChanged = voted !== undefined && nextVoted !== existing.voted;
+      const isCastingNewVote = votedChanged && nextVoted;
+
+      // Only the act of CASTING a vote is time-gated. Undoing a vote (admin
+      // correction) and editing name/phone/remarks work at any time, since
+      // those are administrative/setup actions, not "casting a ballot."
+      if (isCastingNewVote) {
+        const phase = getElectionPhase();
+        if (phase !== "live") {
+          const message = phase === "before"
+            ? "Voting has not started yet."
+            : "Voting has closed.";
+          return res.status(403).json({ error: message, phase });
+        }
+      }
 
       const [updated] = await sql`
         UPDATE engineers
@@ -42,7 +57,7 @@ export default async function handler(req, res) {
         RETURNING id, iek_number, name, phone, voted, remarks, created_at, updated_at
       `;
 
-      if (votedChanged && nextVoted) {
+      if (isCastingNewVote) {
         await sql`INSERT INTO votes (engineer_id, voter_ip) VALUES (${engineerId}, ${ip})`;
         await logAudit(sql, "VOTE", engineerId, ip);
       } else if (votedChanged && !nextVoted) {

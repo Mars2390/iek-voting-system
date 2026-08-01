@@ -44,3 +44,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_votes_engineer_id ON votes(engineer_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_engineer_id ON audit_log(engineer_id);
+
+-- Candidates being voted FOR (e.g. "Eng. Stariko Nyamori — Honorary Treasurer").
+-- This is separate from `engineers` on purpose: `engineers` tracks turnout
+-- (did this registered member show up and vote), while `candidates` tracks
+-- tallies per office. A candidate is not required to also be a row in
+-- `engineers` (and vice versa) — the two lists are independent.
+CREATE TABLE IF NOT EXISTS candidates (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    position VARCHAR(100) NOT NULL,
+    votes INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidates_position ON candidates(position);

@@ -1,16 +1,32 @@
 /* =========================================================
    IEK Online Voting System — Application Logic
    Data persistence: Neon PostgreSQL via Vercel Functions (/api/*)
-   All localStorage code has been removed — every action hits
-   the API, so every visitor sees the same live data.
+   Real-time-ish: polls the API every 5s so every device converges
+   on the same data without a manual refresh (see README for why
+   polling was chosen over WebSockets).
    ========================================================= */
 
 (function () {
   "use strict";
 
+  const POLL_INTERVAL_MS = 5000;
+  const COUNTDOWN_TICK_MS = 1000;
+  const MAX_NOTIFICATIONS = 40;
+
   let engineers = [];
+  let engineersById = new Map();
+  let candidates = [];
+  let candidatesById = new Map();
+  let hasLoadedOnce = false;
   let activeFilter = "all"; // all | voted | not-voted
   let isBusy = false;
+
+  let electionStatus = null; // { phase, startsAt, endsAt, serverTime, testMode }
+  let notifications = [];
+  let unseenCount = 0;
+
+  let pollTimer = null;
+  let countdownTimer = null;
 
   // ---------- DOM references ----------
   const el = {
@@ -32,6 +48,7 @@
     printBtn: document.getElementById("printBtn"),
     resetVotesBtn: document.getElementById("resetVotesBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
+    lastUpdated: document.getElementById("lastUpdated"),
     toast: document.getElementById("toast"),
     statTotal: document.getElementById("statTotal"),
     statVoted: document.getElementById("statVoted"),
@@ -43,6 +60,23 @@
     retryConnectionBtn: document.getElementById("retryConnectionBtn"),
     clock: document.getElementById("clock"),
     year: document.getElementById("year"),
+    notificationBell: document.getElementById("notificationBell"),
+    bellBadge: document.getElementById("bellBadge"),
+    notificationDropdown: document.getElementById("notificationDropdown"),
+    notificationList: document.getElementById("notificationList"),
+    countdownBanner: document.getElementById("countdownBanner"),
+    countdownPhaseLabel: document.getElementById("countdownPhaseLabel"),
+    countdownClock: document.getElementById("countdownClock"),
+    countdownSub: document.getElementById("countdownSub"),
+    auditLogBtn: document.getElementById("auditLogBtn"),
+    auditPanel: document.getElementById("auditPanel"),
+    closeAuditBtn: document.getElementById("closeAuditBtn"),
+    auditTableBody: document.getElementById("auditTableBody"),
+    toggleCandidateFormBtn: document.getElementById("toggleCandidateFormBtn"),
+    cancelCandidateFormBtn: document.getElementById("cancelCandidateFormBtn"),
+    candidateForm: document.getElementById("candidateForm"),
+    candidatesGrid: document.getElementById("candidatesGrid"),
+    candidatesEmpty: document.getElementById("candidatesEmpty"),
   };
 
   // ---------- Utilities ----------
@@ -60,6 +94,15 @@
       .slice(0, 2)
       .map((w) => w[0]?.toUpperCase() || "")
       .join("") || "?";
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "";
+    const d = new Date(value);
+    return d.toLocaleString("en-US", {
+      month: "2-digit", day: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hour12: true,
+    }).replace(",", "");
   }
 
   function showToast(message, isError) {
@@ -100,7 +143,7 @@
     try {
       body = await response.json();
     } catch (parseErr) {
-      // response had no JSON body (e.g. 204) — fine for some endpoints
+      // no JSON body — fine for some responses
     }
 
     if (!response.ok) {
@@ -118,6 +161,162 @@
 
   async function fetchStats() {
     return apiFetch("/api/stats");
+  }
+
+  async function fetchElectionStatus() {
+    return apiFetch("/api/election-status");
+  }
+
+  async function fetchCandidates() {
+    const data = await apiFetch("/api/candidates");
+    return data.candidates;
+  }
+
+  // ---------- Notifications ----------
+  function pushNotification(message) {
+    notifications.unshift({ message, time: new Date() });
+    if (notifications.length > MAX_NOTIFICATIONS) notifications.length = MAX_NOTIFICATIONS;
+    unseenCount += 1;
+    renderNotifications();
+    showToast(message);
+  }
+
+  function renderNotifications() {
+    el.bellBadge.hidden = unseenCount === 0;
+    el.bellBadge.textContent = unseenCount > 9 ? "9+" : String(unseenCount);
+
+    if (notifications.length === 0) {
+      el.notificationList.innerHTML = '<p class="notification-empty">No activity yet.</p>';
+      return;
+    }
+
+    el.notificationList.innerHTML = notifications.map((n) => `
+      <div class="notification-item">
+        <span>${escapeHtml(n.message)}</span>
+        <span class="notification-item-time">${n.time.toLocaleTimeString()}</span>
+      </div>
+    `).join("");
+  }
+
+  function diffAndNotify(previousById, newList) {
+    let newlyVotedCount = 0;
+    let newlyAddedCount = 0;
+    let firstVotedName = "";
+    let firstAddedName = "";
+
+    for (const e of newList) {
+      const prev = previousById.get(e.id);
+      if (!prev) {
+        newlyAddedCount += 1;
+        if (!firstAddedName) firstAddedName = e.name;
+      } else if (!prev.voted && e.voted) {
+        newlyVotedCount += 1;
+        if (!firstVotedName) firstVotedName = e.name;
+      }
+    }
+
+    if (newlyVotedCount === 1) {
+      pushNotification(`📢 ${firstVotedName} has voted!`);
+    } else if (newlyVotedCount > 1) {
+      pushNotification(`📢 ${firstVotedName} and ${newlyVotedCount - 1} other${newlyVotedCount - 1 === 1 ? "" : "s"} just voted!`);
+    }
+
+    if (newlyAddedCount === 1) {
+      pushNotification(`🆕 ${firstAddedName} was registered.`);
+    } else if (newlyAddedCount > 1) {
+      pushNotification(`🆕 ${firstAddedName} and ${newlyAddedCount - 1} other${newlyAddedCount - 1 === 1 ? "" : "s"} were registered.`);
+    }
+  }
+
+  function diffCandidatesAndNotify(previousById, newList) {
+    for (const c of newList) {
+      const prev = previousById.get(c.id);
+      if (prev && c.votes > prev.votes) {
+        const gained = c.votes - prev.votes;
+        pushNotification(`🗳️ ${c.name} (${c.position}) received ${gained === 1 ? "a vote" : `${gained} votes`} — now at ${c.votes}.`);
+      } else if (!prev) {
+        pushNotification(`🆕 Candidate added: ${c.name} for ${c.position}.`);
+      }
+    }
+  }
+
+  function toggleNotificationDropdown() {
+    const willOpen = el.notificationDropdown.hidden;
+    el.notificationDropdown.hidden = !willOpen;
+    if (willOpen) {
+      unseenCount = 0;
+      renderNotifications();
+    }
+  }
+
+  // ---------- Election countdown ----------
+  function pluralize(n, word) {
+    return `${n} ${word}${n === 1 ? "" : "s"}`;
+  }
+
+  function renderCountdown() {
+    el.countdownBanner.classList.remove("phase-before", "phase-live", "phase-closed");
+
+    if (!electionStatus) {
+      el.countdownPhaseLabel.textContent = "Loading election status…";
+      el.countdownClock.textContent = "--";
+      el.countdownSub.textContent = "";
+      return;
+    }
+
+    const { phase, startsAt, endsAt, testMode } = electionStatus;
+    el.countdownBanner.classList.add(`phase-${phase}`);
+
+    const now = new Date();
+
+    if (phase === "before") {
+      const diff = Math.max(0, new Date(startsAt) - now);
+      const s = Math.floor(diff / 1000);
+      const days = Math.floor(s / 86400);
+      const hours = Math.floor((s % 86400) / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const seconds = s % 60;
+
+      el.countdownPhaseLabel.textContent = "🗳️ Voting Starts In";
+      el.countdownClock.textContent =
+        `${pluralize(days, "day")} ${pluralize(hours, "hour")} ${pluralize(minutes, "minute")} ${pluralize(seconds, "second")}`;
+      el.countdownSub.textContent = `Opens: ${new Date(startsAt).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })}`;
+    } else if (phase === "live") {
+      const diff = Math.max(0, new Date(endsAt) - now);
+      const s = Math.floor(diff / 1000);
+      const hours = Math.floor(s / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const seconds = s % 60;
+
+      el.countdownPhaseLabel.textContent = "🟢 VOTING IS LIVE!";
+      el.countdownClock.textContent = `Closes in ${pluralize(hours, "hour")} ${pluralize(minutes, "minute")} ${pluralize(seconds, "second")}`;
+      el.countdownSub.textContent = `Closes: ${new Date(endsAt).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })}`;
+    } else {
+      el.countdownPhaseLabel.textContent = "🔴 VOTING CLOSED";
+      el.countdownClock.textContent = "Thank you to everyone who voted.";
+      el.countdownSub.textContent = `Closed: ${new Date(endsAt).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" })}`;
+    }
+
+    if (testMode) {
+      el.countdownSub.textContent += " · ⚠️ TEST MODE — voting window bypassed via ALLOW_TEST_VOTES";
+    }
+  }
+
+  async function refreshElectionStatus() {
+    try {
+      const newStatus = await fetchElectionStatus();
+      const phaseChanged = electionStatus && electionStatus.phase !== newStatus.phase;
+      electionStatus = newStatus;
+      renderCountdown();
+      render(); // vote button availability depends on phase
+      if (phaseChanged) {
+        if (newStatus.phase === "live") pushNotification("🟢 Voting is now LIVE!");
+        if (newStatus.phase === "closed") pushNotification("🔴 Voting has closed.");
+      }
+    } catch (err) {
+      // Election status is secondary to the main data load; fail quietly here,
+      // the connection banner from loadAll() already covers DB-down cases.
+    }
   }
 
   // ---------- Filtering (client-side, over the last loaded list) ----------
@@ -140,6 +339,7 @@
   // ---------- Render ----------
   function render() {
     const list = getFiltered();
+    const votingIsLive = electionStatus?.phase === "live";
 
     el.resultsCount.textContent = `${list.length} engineer${list.length === 1 ? "" : "s"}`;
 
@@ -152,6 +352,18 @@
       el.tableBody.innerHTML = list.map((e) => {
         const voted = !!e.voted;
         const remarks = e.remarks ? escapeHtml(e.remarks) : '<span class="remarks-text empty">No remarks</span>';
+
+        let voteAction;
+        if (voted) {
+          voteAction = `
+            <span class="voted-pill">&#9989; ALREADY VOTED</span>
+            <button class="btn-undo" data-action="undo" data-id="${e.id}" title="Admin correction">Undo</button>`;
+        } else if (votingIsLive) {
+          voteAction = `<button class="btn-vote" data-action="vote" data-id="${e.id}">&#128499;&#65039; VOTE</button>`;
+        } else {
+          const label = electionStatus?.phase === "closed" ? "Voting Closed" : "Not Open Yet";
+          voteAction = `<button class="btn-vote" data-action="vote" data-id="${e.id}" disabled title="${label}">${label}</button>`;
+        }
 
         return `
         <tr data-id="${e.id}" class="${voted ? "row-voted" : "row-not-voted"}">
@@ -168,13 +380,11 @@
               ${voted ? "&#9989; Voted" : "&#10060; Not Voted"}
             </span>
           </td>
+          <td class="voted-timestamp">${voted && e.voted_at ? formatDateTime(e.voted_at) : "—"}</td>
           <td class="remarks-cell">${e.remarks ? `<span class="remarks-text">${remarks}</span>` : remarks}</td>
           <td>
             <div class="actions-cell">
-              ${voted
-                ? `<button class="btn-undo" data-action="undo" data-id="${e.id}">Undo</button>`
-                : `<button class="btn-vote" data-action="vote" data-id="${e.id}">Mark Voted</button>`
-              }
+              ${voteAction}
               <button class="btn-icon-sm" data-action="remarks" data-id="${e.id}">Remarks</button>
               <button class="btn-icon-sm" data-action="edit" data-id="${e.id}">Edit</button>
               <button class="btn-delete" data-action="delete" data-id="${e.id}">Remove</button>
@@ -193,22 +403,81 @@
     el.turnoutBarFill.style.width = `${stats.turnout}%`;
   }
 
+  function renderCandidates() {
+    if (candidates.length === 0) {
+      el.candidatesGrid.innerHTML = "";
+      el.candidatesEmpty.hidden = false;
+      return;
+    }
+    el.candidatesEmpty.hidden = true;
+
+    const totalsByPosition = new Map();
+    for (const c of candidates) {
+      totalsByPosition.set(c.position, (totalsByPosition.get(c.position) || 0) + c.votes);
+    }
+
+    el.candidatesGrid.innerHTML = candidates.map((c) => {
+      const positionTotal = totalsByPosition.get(c.position) || 0;
+      const pct = positionTotal > 0 ? Math.round((c.votes / positionTotal) * 100) : 0;
+      return `
+        <div class="candidate-card" data-id="${c.id}">
+          <span class="candidate-card-position">${escapeHtml(c.position)}</span>
+          <span class="candidate-card-name">${escapeHtml(c.name)}</span>
+          <span class="candidate-card-votes">${c.votes}</span>
+          <span class="candidate-card-votes-label">vote${c.votes === 1 ? "" : "s"} (${pct}% of ${escapeHtml(c.position)} tally)</span>
+          <div class="candidate-bar-track"><div class="candidate-bar-fill" style="width:${pct}%"></div></div>
+          <div class="candidate-card-actions">
+            <button class="btn-tally" data-action="candidate-vote" data-id="${c.id}">+1 Vote</button>
+            <button class="btn-delete" data-action="candidate-delete" data-id="${c.id}">Remove</button>
+          </div>
+        </div>`;
+    }).join("");
+  }
+
   // ---------- Load everything from the API ----------
-  async function loadAll({ silent } = {}) {
-    setBusy(true);
+  async function loadAll({ silent, isPoll } = {}) {
     try {
-      const [engineersList, stats] = await Promise.all([fetchEngineers(), fetchStats()]);
+      const [engineersList, stats, candidatesList] = await Promise.all([
+        fetchEngineers(), fetchStats(), fetchCandidates(),
+      ]);
+
+      if (isPoll && hasLoadedOnce) {
+        diffAndNotify(engineersById, engineersList);
+        diffCandidatesAndNotify(candidatesById, candidatesList);
+      }
+
       engineers = engineersList;
+      engineersById = new Map(engineers.map((e) => [e.id, e]));
+      candidates = candidatesList;
+      candidatesById = new Map(candidates.map((c) => [c.id, c]));
+      hasLoadedOnce = true;
+
       hideConnectionError();
       render();
       renderStats(stats);
+      renderCandidates();
+      el.lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
       if (!silent) showToast("Data refreshed from the database.");
     } catch (err) {
       showConnectionError(err.message || "Could not load data from the database.");
       if (!silent) showToast(err.message, true);
-    } finally {
-      setBusy(false);
     }
+  }
+
+  // ---------- Polling ----------
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => loadAll({ silent: true, isPoll: true }), POLL_INTERVAL_MS);
+  }
+
+  function startCountdownTicking() {
+    // Two independent timers: the display ticks every second (smooth
+    // countdown), while the authoritative phase is re-fetched from the
+    // server every 5s (POLL_INTERVAL_MS) so client clock drift can never
+    // keep voting open/closed longer than the server says it should.
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(renderCountdown, COUNTDOWN_TICK_MS);
+    setInterval(refreshElectionStatus, POLL_INTERVAL_MS);
   }
 
   // ---------- Form (Add / Edit) ----------
@@ -251,8 +520,8 @@
     const phone = document.getElementById("phone").value.trim();
     const remarks = document.getElementById("remarks").value.trim();
 
-    if (!iekNumber || !name || !phone) {
-      showToast("Please fill in all required fields.", true);
+    if (!iekNumber || !name) {
+      showToast("IEK Number and Name are required.", true);
       return;
     }
 
@@ -313,6 +582,7 @@
       await loadAll({ silent: true });
     } catch (err) {
       showToast(err.message, true);
+      await refreshElectionStatus(); // in case the window just closed/hasn't opened
     } finally {
       setBusy(false);
     }
@@ -374,10 +644,82 @@
     }
   }
 
+  // ---------- Candidates ----------
+  function openCandidateForm() {
+    el.candidateForm.reset();
+    el.candidateForm.hidden = false;
+    document.getElementById("candidateName").focus();
+  }
+
+  function closeCandidateForm() {
+    el.candidateForm.reset();
+    el.candidateForm.hidden = true;
+  }
+
+  async function submitCandidateForm(evt) {
+    evt.preventDefault();
+    if (isBusy) return;
+
+    const name = document.getElementById("candidateName").value.trim();
+    const position = document.getElementById("candidatePosition").value.trim();
+    if (!name || !position) {
+      showToast("Candidate name and position are required.", true);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await apiFetch("/api/candidates", {
+        method: "POST",
+        body: JSON.stringify({ name, position }),
+      });
+      showToast(`${name} added as a candidate for ${position}.`);
+      closeCandidateForm();
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function voteCandidate(id) {
+    const c = candidates.find((x) => String(x.id) === String(id));
+    if (!c) return;
+    if (!confirm(`Record one counted ballot for ${c.name} (${c.position})?`)) return;
+
+    setBusy(true);
+    try {
+      await apiFetch(`/api/candidates/${id}/vote`, { method: "POST" });
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteCandidate(id) {
+    const c = candidates.find((x) => String(x.id) === String(id));
+    if (!c) return;
+    if (!confirm(`Remove candidate ${c.name} (${c.position})? This cannot be undone.`)) return;
+
+    setBusy(true);
+    try {
+      await apiFetch(`/api/candidates/${id}`, { method: "DELETE" });
+      showToast(`${c.name} removed from candidates.`);
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // ---------- Bulk import ----------
   async function handleImportFile(evt) {
     const file = evt.target.files[0];
-    evt.target.value = ""; // allow re-selecting the same file next time
+    evt.target.value = "";
     if (!file) return;
 
     const text = await file.text();
@@ -409,6 +751,32 @@
 
   function printResults() {
     window.print();
+  }
+
+  // ---------- Audit log ----------
+  async function toggleAuditPanel() {
+    const willOpen = el.auditPanel.hidden;
+    el.auditPanel.hidden = !willOpen;
+    if (!willOpen) return;
+
+    el.auditTableBody.innerHTML = `<tr><td colspan="4">Loading…</td></tr>`;
+    try {
+      const data = await apiFetch("/api/audit-log");
+      if (data.entries.length === 0) {
+        el.auditTableBody.innerHTML = `<tr><td colspan="4">No audit entries yet.</td></tr>`;
+        return;
+      }
+      el.auditTableBody.innerHTML = data.entries.map((entry) => `
+        <tr>
+          <td>${formatDateTime(entry.timestamp)}</td>
+          <td>${escapeHtml(entry.action)}</td>
+          <td>${entry.iek_number ? escapeHtml(`${entry.name} (${entry.iek_number})`) : "—"}</td>
+          <td>${escapeHtml(entry.user_ip || "")}</td>
+        </tr>
+      `).join("");
+    } catch (err) {
+      el.auditTableBody.innerHTML = `<tr><td colspan="4">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+    }
   }
 
   // ---------- Clock ----------
@@ -449,9 +817,37 @@
     el.refreshBtn.addEventListener("click", () => loadAll());
     el.retryConnectionBtn.addEventListener("click", () => loadAll());
 
-    el.tableBody.addEventListener("click", (evt) => {
+    el.notificationBell.addEventListener("click", toggleNotificationDropdown);
+    document.addEventListener("click", (evt) => {
+      if (!el.notificationDropdown.hidden &&
+          !el.notificationDropdown.contains(evt.target) &&
+          evt.target !== el.notificationBell) {
+        el.notificationDropdown.hidden = true;
+      }
+    });
+
+    el.auditLogBtn.addEventListener("click", toggleAuditPanel);
+    el.closeAuditBtn.addEventListener("click", () => { el.auditPanel.hidden = true; });
+
+    el.toggleCandidateFormBtn.addEventListener("click", () => {
+      if (el.candidateForm.hidden) openCandidateForm();
+      else closeCandidateForm();
+    });
+    el.cancelCandidateFormBtn.addEventListener("click", closeCandidateForm);
+    el.candidateForm.addEventListener("submit", submitCandidateForm);
+
+    el.candidatesGrid.addEventListener("click", (evt) => {
       const btn = evt.target.closest("button[data-action]");
       if (!btn || isBusy) return;
+      const id = btn.getAttribute("data-id");
+      const action = btn.getAttribute("data-action");
+      if (action === "candidate-vote") voteCandidate(id);
+      if (action === "candidate-delete") deleteCandidate(id);
+    });
+
+    el.tableBody.addEventListener("click", (evt) => {
+      const btn = evt.target.closest("button[data-action]");
+      if (!btn || isBusy || btn.disabled) return;
       const id = btn.getAttribute("data-id");
       const action = btn.getAttribute("data-action");
       if (action === "vote") markVoted(id);
@@ -463,12 +859,17 @@
   }
 
   // ---------- Init ----------
-  function init() {
+  async function init() {
     bindEvents();
     el.year.textContent = new Date().getFullYear();
     tickClock();
     setInterval(tickClock, 1000);
-    loadAll({ silent: true });
+
+    await refreshElectionStatus();
+    await loadAll({ silent: true });
+
+    startPolling();
+    startCountdownTicking();
   }
 
   document.addEventListener("DOMContentLoaded", init);

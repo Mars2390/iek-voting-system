@@ -53,7 +53,14 @@ IEK-VOTING-FULL/
 │   ├── reset-votes.js         # POST — reset all engineers to "not voted"
 │   ├── export.js              # GET — CSV download
 │   ├── seed.js                # POST — insert the 8 sample engineers
-│   └── import.js              # POST — bulk-add engineers from CSV text
+│   ├── import.js              # POST — bulk-add engineers from CSV text
+│   ├── election-status.js     # GET — phase (before/live/closed) + countdown targets
+│   ├── audit-log.js           # GET — recent audit trail (read-only)
+│   ├── candidates.js          # GET (list) / POST (add candidate)
+│   ├── candidates/
+│   │   └── [id].js               # DELETE — remove a candidate
+│   │   └── [id]/vote.js          # POST — +1 tallied vote for a candidate
+│   └── _config.js             # Election window (start/end) + phase logic
 ├── setup.js                  # One-command bootstrap: tables + seed + git push + deploy
 ├── .env.example             # Template for required env vars (committed)
 ├── .env.local                # Your real local DATABASE_URL (gitignored)
@@ -228,6 +235,26 @@ All endpoints return JSON (except `/api/export`, which returns a CSV file). All 
 | `GET` | `/api/export` | Download all engineers as CSV |
 | `POST` | `/api/seed` | Insert the 8 sample engineers (idempotent, optionally protected by `SEED_SECRET`) |
 | `POST` | `/api/import` | Bulk-add engineers from CSV text — body: `{ csv: "..." }` |
+| `GET` | `/api/election-status` | `{ phase, startsAt, endsAt, serverTime, testMode }` — `phase` is `before` \| `live` \| `closed` |
+| `GET` | `/api/audit-log` | Most recent 200 audit trail entries (read-only) |
+| `GET` | `/api/candidates` | List all candidates (grouped by position, sorted by votes) |
+| `POST` | `/api/candidates` | Add a candidate — body: `{ name, position }` |
+| `POST` | `/api/candidates/:id/vote` | Record one counted ballot for a candidate (+1) |
+| `DELETE` | `/api/candidates/:id` | Remove a candidate (correction) |
+
+### Candidates & Results — a separate concept from turnout
+
+The `engineers` table tracks **turnout**: did a registered member show up and vote (yes/no). The new `candidates` table tracks **who people are voting for**, per office — e.g. "Eng. Stariko Nyamori, Honorary Treasurer." These are intentionally independent:
+
+- Marking an engineer "Voted" in the turnout table does **not** change any candidate's tally.
+- Recording a candidate's **+1 Vote** does **not** mark any engineer as having voted.
+- A candidate does not need to also exist as a row in `engineers`, and vice versa.
+
+This mirrors a real in-person process: a check-in desk marks who showed up (turnout), while ballots are counted separately into a tally per candidate. The **+1 Vote** button on a candidate card is how an official records each counted ballot.
+
+**To add Eng. Stariko Nyamori (Honorary Treasurer):** open the app, click **+ Add Candidate** in the "Candidates & Results" section, and enter his name and position. I didn't add him for you directly against your live production database — that's a real write to a live election system, and it's the kind of action you should trigger yourself rather than have it happen silently on your behalf. It takes 10 seconds once deployed.
+
+If it turns out you actually need each individual engineer's vote to be attributed to a specific candidate (a real ballot — "this voter chose that candidate"), that's a further step up from what's here (linking `votes` to `candidates`, one selection per position per voter) and is a bigger change than what's been built in this pass — say so if that's what election day actually requires and it can be scoped properly rather than rushed in now.
 
 ### Bulk CSV import
 
@@ -248,6 +275,37 @@ IEK010,Eng. John Smith,0700000001,
 Setting `voted: true` via `PUT /api/engineers/:id` inserts a row into `votes` (with `voter_ip`) and logs `VOTE` to `audit_log`. Setting it back to `false` logs `UNDO_VOTE`. Any other field change logs `UPDATE`. Create/delete log `CREATE`/`DELETE`. Resetting logs a single `RESET_ALL`.
 
 ---
+
+## Election window & voting lock
+
+The voting window is hardcoded in `api/_config.js`:
+
+```js
+export const VOTING_START = new Date("2026-08-03T08:00:00+03:00"); // Mon Aug 3 2026, 8:00 AM EAT
+export const VOTING_END   = new Date("2026-08-03T17:00:00+03:00"); // Mon Aug 3 2026, 5:00 PM EAT
+```
+
+This is enforced **server-side**, not just in the UI — `PUT /api/engineers/:id` rejects any attempt to cast a *new* vote (`{ voted: true }` on someone who hasn't voted yet) with `403` outside this window, regardless of what the browser shows. The frontend countdown banner reflects the same window via `GET /api/election-status`, re-checked every 5 seconds so it self-corrects if a client's clock is off.
+
+Undoing a vote, editing details, adding/importing engineers, exporting, and viewing the audit log are **not** time-gated — those are setup/admin actions you'll need before and after the window, not "casting a ballot."
+
+**To change the date/time:** edit the two constants in `api/_config.js` and redeploy.
+
+### Testing the vote flow before Monday
+
+With the real dates in place, every "Mark Voted" click will be rejected with *"Voting has not started yet"* until 8:00 AM Monday — including your own testing today. To test the full voting flow right now:
+
+1. In Vercel → Settings → Environment Variables, add `ALLOW_TEST_VOTES` = `true`.
+2. Redeploy. The countdown banner will show a "⚠️ TEST MODE" notice and every vote will be accepted regardless of the clock.
+3. **Before election day, delete that variable (or set it to `false`) and redeploy again** — otherwise the real time-lock never actually takes effect and anyone can vote at any time.
+
+## Real-time updates
+
+Every open device polls `GET /api/engineers` + `GET /api/stats` every 5 seconds and diffs the result against what it last saw, to:
+- Update the dashboard, table, and turnout bar without a manual refresh.
+- Fire a toast + notification-bell entry when someone votes or a new engineer is registered.
+
+**Why polling instead of WebSockets:** the ask allowed either ("setInterval() ... OR implement WebSocket"). A 5-second poll of two small JSON endpoints is simple, needs no persistent-connection infrastructure, and is plenty responsive for an in-person election-day check-in desk. The **Refresh** button and the **🔔 Live** badge remain as an always-available manual/visual backup. If you later need sub-second updates across many simultaneous remote voters, that's the point where WebSockets (Vercel Functions do support them) would start to earn their added complexity.
 
 ## How to Use the App
 
@@ -277,6 +335,8 @@ This build intentionally does **not** include authentication — it wasn't part 
 
 Ask if you want this wired in — it's a meaningfully different scope than what was built here (frontend + database + CRUD API), so it wasn't added silently.
 
+Two more specifics for election day: `GET /api/audit-log` is read-only but exposes voter IP addresses to anyone who can reach it — acceptable for an internal committee tool, worth knowing if the link is ever shared outside the committee. And the voting-window lock (`403` outside 8 AM–5 PM Monday) blocks *casting a new vote* server-side, but does **not** stop someone from adding/editing/deleting engineer records at any time — that was intentional (you need to keep registering people right up to Monday) but means the same lack of authentication applies to those endpoints around the clock, not just during the vote window.
+
 ---
 
 ## Deployment scripts
@@ -284,6 +344,28 @@ Ask if you want this wired in — it's a meaningfully different scope than what 
 `DEPLOY.bat` / `deploy.ps1` (unchanged in behavior from before) stage, commit, and push to GitHub, which triggers Vercel's Git integration to redeploy. They do **not** touch your database, run migrations, or seed data — do those manually per the steps above. After pushing, the script reminds you to confirm `DATABASE_URL` is set in Vercel and to seed a fresh database if needed.
 
 ---
+
+## Election Day Checklist
+
+**Before Monday:**
+- [ ] Confirm `ALLOW_TEST_VOTES` is **not** set to `true` in Vercel (Settings → Environment Variables). If you added it to test, remove it or set it to `false`, then redeploy.
+- [ ] Register every eligible engineer (via the form, **Import CSV**, or `POST /api/import`).
+- [ ] Add every candidate (e.g. Eng. Stariko Nyamori — Honorary Treasurer) via **+ Add Candidate** in the Candidates & Results section.
+- [ ] Double-check `api/_config.js` has the correct start/end date/time if it ever needs to change.
+- [ ] Run **Reset All Votes** once, right before the real window opens, if anyone cast test votes while `ALLOW_TEST_VOTES` was on — otherwise their test vote will still show as "Voted" on the real day.
+- [ ] Share the live link: `https://iek-voting-system.vercel.app` (or check your Vercel dashboard for your actual assigned domain if this one isn't it).
+- [ ] Read the [Security note](#security-note-please-read) below — there is currently no login, so anyone with the link can vote, add, or edit. Fine for a supervised in-person check-in desk; not fine if the link goes somewhere uncontrolled.
+
+**On election day:**
+- [ ] The countdown banner flips to "🟢 VOTING IS LIVE!" automatically at 8:00 AM — no action needed.
+- [ ] Vote buttons enable automatically at the same moment across every open device/tab.
+- [ ] Use **View Audit Log** any time to see a live who/what/when trail of every action.
+- [ ] At 5:00 PM the banner flips to "🔴 VOTING CLOSED" and vote buttons disable automatically — again, no action needed.
+
+**After voting closes:**
+- [ ] **Export CSV** for the official record.
+- [ ] **View Audit Log** to review the full trail if anything needs reconciling.
+- [ ] Consider taking the deployment offline or restricting write access afterward, since the API has no login and will otherwise stay open indefinitely.
 
 ## Browser Support
 

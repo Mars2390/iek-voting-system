@@ -158,7 +158,17 @@ async function main() {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_votes_engineer_id ON votes(engineer_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_engineer_id ON audit_log(engineer_id)`;
-  ok("Tables created!");
+  await sql`
+    CREATE TABLE IF NOT EXISTS candidates (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      position VARCHAR(100) NOT NULL,
+      votes INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_candidates_position ON candidates(position)`;
+  ok("Tables created! (existing engineers/votes/audit_log data is untouched — CREATE TABLE IF NOT EXISTS only adds what's missing)");
 
   step("Seeding sample engineers");
   const SAMPLE_ENGINEERS = [

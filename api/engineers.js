@@ -12,9 +12,13 @@ export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
       const rows = await sql`
-        SELECT id, iek_number, name, phone, voted, remarks, created_at, updated_at
-        FROM engineers
-        ORDER BY created_at ASC
+        SELECT e.id, e.iek_number, e.name, e.phone, e.voted, e.remarks,
+               e.created_at, e.updated_at, v.voted_at
+        FROM engineers e
+        LEFT JOIN LATERAL (
+          SELECT voted_at FROM votes WHERE engineer_id = e.id ORDER BY voted_at DESC LIMIT 1
+        ) v ON true
+        ORDER BY e.created_at ASC
       `;
       return res.status(200).json({ engineers: rows });
     }
@@ -22,8 +26,10 @@ export default async function handler(req, res) {
     if (req.method === "POST") {
       const { iekNumber, name, phone, remarks } = req.body || {};
 
-      if (!iekNumber || !name || !phone) {
-        return res.status(400).json({ error: "iekNumber, name and phone are required." });
+      // Phone is intentionally optional here (the DB column is nullable) —
+      // sometimes you need to register someone before you have their number.
+      if (!iekNumber || !name) {
+        return res.status(400).json({ error: "iekNumber and name are required." });
       }
 
       const existing = await sql`SELECT id FROM engineers WHERE iek_number = ${iekNumber}`;
@@ -33,7 +39,7 @@ export default async function handler(req, res) {
 
       const [engineer] = await sql`
         INSERT INTO engineers (iek_number, name, phone, remarks)
-        VALUES (${iekNumber}, ${name}, ${phone}, ${remarks || null})
+        VALUES (${iekNumber}, ${name}, ${phone || null}, ${remarks || null})
         RETURNING id, iek_number, name, phone, voted, remarks, created_at, updated_at
       `;
 

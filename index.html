@@ -29,13 +29,32 @@
       </div>
     </div>
     <div class="header-actions">
-      <span class="live-badge"><span class="dot"></span> Live Voting</span>
+      <span class="live-badge" id="pollingBadge"><span class="dot"></span> Live</span>
+      <div class="bell-wrap">
+        <button class="bell-btn" id="notificationBell" type="button" aria-label="Notifications">
+          &#128276;
+          <span class="bell-badge" id="bellBadge" hidden>0</span>
+        </button>
+        <div class="notification-dropdown" id="notificationDropdown" hidden>
+          <div class="notification-dropdown-header">Recent Activity</div>
+          <div id="notificationList" class="notification-list">
+            <p class="notification-empty">No activity yet.</p>
+          </div>
+        </div>
+      </div>
       <span id="clock" class="clock"></span>
     </div>
   </div>
 </header>
 
 <main class="container">
+
+  <!-- Election countdown / phase banner -->
+  <section class="countdown-banner" id="countdownBanner" aria-live="polite">
+    <div class="countdown-phase-label" id="countdownPhaseLabel">Loading election status&hellip;</div>
+    <div class="countdown-clock" id="countdownClock">--</div>
+    <div class="countdown-sub" id="countdownSub"></div>
+  </section>
 
   <!-- Statistics Dashboard -->
   <section class="dashboard" aria-label="Voting statistics">
@@ -120,6 +139,66 @@
       <button class="btn btn-danger" id="resetVotesBtn" type="button">
         <span>&#8635;</span> Reset All Votes
       </button>
+      <button class="btn btn-outline" id="auditLogBtn" type="button">
+        <span>&#128220;</span> View Audit Log
+      </button>
+    </div>
+    <div class="last-updated" id="lastUpdated"></div>
+  </section>
+
+  <!-- Audit log panel -->
+  <section class="panel audit-panel" id="auditPanel" hidden>
+    <div class="table-panel-header">
+      <h2>Audit Trail</h2>
+      <button class="btn btn-outline btn-sm" id="closeAuditBtn" type="button">Close</button>
+    </div>
+    <div class="table-scroll">
+      <table id="auditTable">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Action</th>
+            <th>Engineer</th>
+            <th>IP</th>
+          </tr>
+        </thead>
+        <tbody id="auditTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Candidates & Results -->
+  <section class="panel candidates-panel">
+    <div class="table-panel-header">
+      <h2>Candidates &amp; Results</h2>
+      <button class="btn btn-primary btn-sm" id="toggleCandidateFormBtn" type="button">+ Add Candidate</button>
+    </div>
+    <p class="candidates-caption">
+      Vote tallies per office (e.g. Honorary Treasurer). This is separate from the turnout
+      table below — marking an engineer "Voted" there does <strong>not</strong> affect these
+      counts. Use <strong>+1 Vote</strong> here as each counted ballot for that candidate is tallied.
+    </p>
+
+    <form id="candidateForm" class="candidate-form" hidden autocomplete="off">
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="candidateName">Candidate Name *</label>
+          <input type="text" id="candidateName" required placeholder="e.g. Eng. Stariko Nyamori">
+        </div>
+        <div class="form-field">
+          <label for="candidatePosition">Position *</label>
+          <input type="text" id="candidatePosition" required placeholder="e.g. Honorary Treasurer">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Add Candidate</button>
+        <button type="button" class="btn btn-outline" id="cancelCandidateFormBtn">Cancel</button>
+      </div>
+    </form>
+
+    <div id="candidatesGrid" class="candidates-grid"></div>
+    <div id="candidatesEmpty" class="empty-state" hidden>
+      <p>&#128203; No candidates added yet. Click "+ Add Candidate" to add the first one.</p>
     </div>
   </section>
 
@@ -138,8 +217,8 @@
           <input type="text" id="fullName" required placeholder="e.g. Eng. John Kamau">
         </div>
         <div class="form-field">
-          <label for="phone">Phone Number *</label>
-          <input type="tel" id="phone" required placeholder="e.g. 0712345678">
+          <label for="phone">Phone Number</label>
+          <input type="tel" id="phone" placeholder="e.g. 0712345678 (optional)">
         </div>
         <div class="form-field">
           <label for="remarks">Remarks</label>
@@ -156,7 +235,7 @@
   <!-- Engineers Table -->
   <section class="panel table-panel">
     <div class="table-panel-header">
-      <h2>Registered Engineers</h2>
+      <h2>Registered Engineers &mdash; Turnout</h2>
       <span id="resultsCount" class="results-count">0 engineers</span>
     </div>
     <div class="table-scroll">
@@ -167,6 +246,7 @@
             <th>Name</th>
             <th>Phone</th>
             <th>Status</th>
+            <th>Voted At</th>
             <th>Remarks</th>
             <th>Actions</th>
           </tr>
