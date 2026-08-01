@@ -1,7 +1,11 @@
-import { getSql } from "../_db.js";
-import { applyCors, getClientIp, logAudit, sendError } from "../_utils.js";
+import { getSql } from "./_db.js";
+import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 
 // DELETE /api/candidates/:id -> remove a candidate (admin correction, e.g. wrong entry)
+//
+// This file is deployed at /api/candidate (no brackets). vercel.json
+// rewrites /api/candidates/:id -> /api/candidate?id=:id. See vercel.json
+// for why this replaced a bracket-folder dynamic route ([id].js).
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();

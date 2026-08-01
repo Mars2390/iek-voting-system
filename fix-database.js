@@ -115,8 +115,12 @@ async function main() {
   // literal footgun where a single backslash before a non-special
   // character (like \d) gets silently dropped, which would otherwise
   // send the wrong pattern to Postgres.
+  // Purely-numeric iek_number (row-number artifacts) OR the literal
+  // "SN"/"Name" header row, in case a raw file gets re-imported by mistake.
   const corrupted = await sql`
-    SELECT id, iek_number, name FROM engineers WHERE iek_number ~ '^[0-9]+$' ORDER BY id
+    SELECT id, iek_number, name FROM engineers
+    WHERE iek_number ~ '^[0-9]+$' OR iek_number = 'SN'
+    ORDER BY id
   `;
 
   let deletedCount = 0;
@@ -127,7 +131,7 @@ async function main() {
     corrupted.slice(0, 10).forEach((r) => console.log(`   id=${r.id}  iek_number="${r.iek_number}"  name="${r.name}"`));
     if (corrupted.length > 10) console.log(`   ... and ${corrupted.length - 10} more`);
 
-    await sql`DELETE FROM engineers WHERE iek_number ~ '^[0-9]+$'`;
+    await sql`DELETE FROM engineers WHERE iek_number ~ '^[0-9]+$' OR iek_number = 'SN'`;
     deletedCount = corrupted.length;
     ok(`🗑️ Deleted ${deletedCount} corrupted rows`);
   }

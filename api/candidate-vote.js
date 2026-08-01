@@ -1,14 +1,18 @@
-import { getSql } from "../../_db.js";
-import { applyCors, getClientIp, logAudit, sendError } from "../../_utils.js";
+import { getSql } from "./_db.js";
+import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 
 // POST /api/candidates/:id/vote -> record one counted ballot for this candidate
 //
-// This is intentionally NOT tied to a specific engineer/voter record — it
-// represents an election official recording a tallied ballot for a
-// position, separate from the engineers table's turnout tracking (did
-// someone show up and vote). Not time-gated by the voting window on
-// purpose: tallying/correction may reasonably happen slightly before or
-// after the window while ballots are being counted.
+// This file is deployed at /api/candidate-vote (no brackets). vercel.json
+// rewrites /api/candidates/:id/vote -> /api/candidate-vote?id=:id. See
+// vercel.json for why this replaced a bracket-folder dynamic route.
+//
+// Not tied to a specific engineer/voter record — it represents an election
+// official recording a tallied ballot for a position, separate from the
+// engineers table's turnout tracking (did someone show up and vote). Not
+// time-gated by the voting window on purpose: tallying/correction may
+// reasonably happen slightly before or after the window while ballots are
+// being counted.
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();

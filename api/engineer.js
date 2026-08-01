@@ -1,9 +1,14 @@
-import { getSql } from "../_db.js";
-import { applyCors, getClientIp, logAudit, sendError } from "../_utils.js";
-import { getElectionPhase } from "../_config.js";
+import { getSql } from "./_db.js";
+import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
+import { getElectionPhase } from "./_config.js";
 
 // PUT    /api/engineers/:id -> update name/phone/remarks and/or voted status
 // DELETE /api/engineers/:id -> remove an engineer
+//
+// This file is deployed at /api/engineer (no brackets). vercel.json rewrites
+// /api/engineers/:id -> /api/engineer?id=:id so the browser-facing URL stays
+// the same; see the note in vercel.json for why this replaced a bracket-
+// folder dynamic route ([id].js), which 404'd in production.
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
