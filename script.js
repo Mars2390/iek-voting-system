@@ -19,6 +19,7 @@
   let candidatesById = new Map();
   let hasLoadedOnce = false;
   let activeFilter = "all"; // all | voted | not-voted
+  let activeContactFilter = ""; // "" | not_contacted | confirmed | follow_up | declined
   let isBusy = false;
 
   let electionStatus = null; // { phase, startsAt, endsAt, serverTime, testMode }
@@ -54,7 +55,9 @@
     statVoted: document.getElementById("statVoted"),
     statNotVoted: document.getElementById("statNotVoted"),
     statTurnout: document.getElementById("statTurnout"),
+    statFollowUp: document.getElementById("statFollowUp"),
     turnoutBarFill: document.getElementById("turnoutBarFill"),
+    contactFilter: document.getElementById("contactFilter"),
     connectionBanner: document.getElementById("connectionBanner"),
     connectionBannerText: document.getElementById("connectionBannerText"),
     retryConnectionBtn: document.getElementById("retryConnectionBtn"),
@@ -332,9 +335,17 @@
         activeFilter === "all" ||
         (activeFilter === "voted" && e.voted) ||
         (activeFilter === "not-voted" && !e.voted);
-      return matchesQuery && matchesFilter;
+      const matchesContactFilter = !activeContactFilter || e.contact_status === activeContactFilter;
+      return matchesQuery && matchesFilter && matchesContactFilter;
     });
   }
+
+  const CONTACT_STATUS_LABELS = {
+    not_contacted: "Not Contacted",
+    confirmed: "Confirmed",
+    follow_up: "Needs Follow-up",
+    declined: "Declined",
+  };
 
   // ---------- Render ----------
   function render() {
@@ -381,6 +392,13 @@
             </span>
           </td>
           <td class="voted-timestamp">${voted && e.voted_at ? formatDateTime(e.voted_at) : "—"}</td>
+          <td>
+            <select class="contact-select ${e.contact_status || "not_contacted"}" data-action="contact-status" data-id="${e.id}" title="${e.last_contacted_at ? `Last contacted: ${formatDateTime(e.last_contacted_at)}` : "Never contacted"}">
+              ${Object.entries(CONTACT_STATUS_LABELS).map(([value, label]) =>
+                `<option value="${value}" ${(e.contact_status || "not_contacted") === value ? "selected" : ""}>${label}</option>`
+              ).join("")}
+            </select>
+          </td>
           <td class="remarks-cell">${e.remarks ? `<span class="remarks-text">${remarks}</span>` : remarks}</td>
           <td>
             <div class="actions-cell">
@@ -401,6 +419,7 @@
     el.statNotVoted.textContent = stats.notVoted;
     el.statTurnout.textContent = `${stats.turnout}%`;
     el.turnoutBarFill.style.width = `${stats.turnout}%`;
+    el.statFollowUp.textContent = stats.needsFollowUp ?? 0;
   }
 
   function renderCandidates() {
@@ -419,8 +438,13 @@
     el.candidatesGrid.innerHTML = candidates.map((c) => {
       const positionTotal = totalsByPosition.get(c.position) || 0;
       const pct = positionTotal > 0 ? Math.round((c.votes / positionTotal) * 100) : 0;
+      const photo = c.photo_url
+        ? `<img class="candidate-card-photo" src="${escapeHtml(c.photo_url)}" alt="${escapeHtml(c.name)}">`
+        : `<div class="avatar candidate-card-photo">${escapeHtml(initials(c.name))}</div>`;
+
       return `
         <div class="candidate-card" data-id="${c.id}">
+          ${photo}
           <span class="candidate-card-position">${escapeHtml(c.position)}</span>
           <span class="candidate-card-name">${escapeHtml(c.name)}</span>
           <span class="candidate-card-votes">${c.votes}</span>
@@ -629,6 +653,26 @@
     }
   }
 
+  async function setContactStatus(id, contactStatus) {
+    const e = engineers.find((x) => String(x.id) === String(id));
+    if (!e) return;
+
+    setBusy(true);
+    try {
+      await apiFetch(`/api/engineers/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ contactStatus }),
+      });
+      showToast(`${e.name}: marked as "${CONTACT_STATUS_LABELS[contactStatus]}".`);
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+      await loadAll({ silent: true }); // re-sync the dropdown to the real server value
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function resetAllVotes() {
     if (!confirm("Reset ALL voting statuses to 'Not Voted'? This cannot be undone.")) return;
 
@@ -662,6 +706,7 @@
 
     const name = document.getElementById("candidateName").value.trim();
     const position = document.getElementById("candidatePosition").value.trim();
+    const photoUrl = document.getElementById("candidatePhotoUrl").value.trim();
     if (!name || !position) {
       showToast("Candidate name and position are required.", true);
       return;
@@ -671,7 +716,7 @@
     try {
       await apiFetch("/api/candidates", {
         method: "POST",
-        body: JSON.stringify({ name, position }),
+        body: JSON.stringify({ name, position, photoUrl }),
       });
       showToast(`${name} added as a candidate for ${position}.`);
       closeCandidateForm();
@@ -809,6 +854,11 @@
       });
     });
 
+    el.contactFilter.addEventListener("change", () => {
+      activeContactFilter = el.contactFilter.value;
+      render();
+    });
+
     el.importCsvBtn.addEventListener("click", () => el.importCsvInput.click());
     el.importCsvInput.addEventListener("change", handleImportFile);
     el.exportCsvBtn.addEventListener("click", exportCSV);
@@ -855,6 +905,12 @@
       if (action === "remarks") editRemarks(id);
       if (action === "edit") openFormForEdit(id);
       if (action === "delete") deleteEngineer(id);
+    });
+
+    el.tableBody.addEventListener("change", (evt) => {
+      const select = evt.target.closest('select[data-action="contact-status"]');
+      if (!select || isBusy) return;
+      setContactStatus(select.getAttribute("data-id"), select.value);
     });
   }
 

@@ -164,11 +164,20 @@ async function main() {
       name VARCHAR(100) NOT NULL,
       position VARCHAR(100) NOT NULL,
       votes INTEGER DEFAULT 0,
+      photo_url TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_candidates_position ON candidates(position)`;
-  ok("Tables created! (existing engineers/votes/audit_log data is untouched — CREATE TABLE IF NOT EXISTS only adds what's missing)");
+
+  // Sync columns added after the tables already existed on a live database.
+  // ADD COLUMN IF NOT EXISTS is a no-op (and touches no existing rows) when
+  // the column is already there.
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS contact_status VARCHAR(20) DEFAULT 'not_contacted'`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS last_contacted_at TIMESTAMP`;
+  await sql`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS photo_url TEXT`;
+
+  ok("Tables created/synced! (existing engineers/votes/audit_log/candidates data is untouched)");
 
   step("Seeding sample engineers");
   const SAMPLE_ENGINEERS = [

@@ -148,7 +148,10 @@ async function main() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_candidates_position ON candidates(position)`;
-  ok("candidates table ready (existing data untouched if it already existed).");
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS contact_status VARCHAR(20) DEFAULT 'not_contacted'`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS last_contacted_at TIMESTAMP`;
+  await sql`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS photo_url TEXT`;
+  ok("candidates table ready, columns synced (existing data untouched).");
 
   // ---- 3. Import the clean CSV ----
   const csvPath = path.join(__dirname, "data", "iek-voter-register-import.csv");

@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS engineers (
     phone VARCHAR(20),
     voted BOOLEAN DEFAULT FALSE,
     remarks TEXT,
+    -- Canvassing/GOTV tracking: one of 'not_contacted', 'confirmed',
+    -- 'follow_up', 'declined'. Independent of `voted` — this tracks whether
+    -- someone has been called and what they said, not whether they've
+    -- actually cast a vote yet.
+    contact_status VARCHAR(20) DEFAULT 'not_contacted',
+    last_contacted_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -55,6 +61,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     name VARCHAR(100) NOT NULL,
     position VARCHAR(100) NOT NULL,
     votes INTEGER DEFAULT 0,
+    photo_url TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

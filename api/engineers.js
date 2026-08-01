@@ -13,6 +13,7 @@ export default async function handler(req, res) {
     if (req.method === "GET") {
       const rows = await sql`
         SELECT e.id, e.iek_number, e.name, e.phone, e.voted, e.remarks,
+               e.contact_status, e.last_contacted_at,
                e.created_at, e.updated_at, v.voted_at
         FROM engineers e
         LEFT JOIN LATERAL (
@@ -40,7 +41,7 @@ export default async function handler(req, res) {
       const [engineer] = await sql`
         INSERT INTO engineers (iek_number, name, phone, remarks)
         VALUES (${iekNumber}, ${name}, ${phone || null}, ${remarks || null})
-        RETURNING id, iek_number, name, phone, voted, remarks, created_at, updated_at
+        RETURNING id, iek_number, name, phone, voted, remarks, contact_status, last_contacted_at, created_at, updated_at
       `;
 
       await logAudit(sql, "CREATE", engineer.id, getClientIp(req));

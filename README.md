@@ -43,13 +43,16 @@ IEK-VOTING-FULL/
 ├── styles.css              # Kenyan theme, responsive layout, animations
 ├── script.js               # Frontend logic — fetch()-based, no localStorage
 ├── schema.sql               # Run once against Neon to create tables
+├── images/
+│   ├── iek-logo.jpg           # Official IEK logo (used in the header)
+│   └── stariko-nyamori.jpg    # Candidate portrait (used on the candidate card)
 ├── api/
 │   ├── _db.js                # Shared Neon connection (lazy-initialized)
 │   ├── _utils.js              # CORS, audit logging, IP extraction, error helper
+│   ├── _config.js             # Election window (start/end) + phase logic
 │   ├── engineers.js           # GET (list) / POST (create)
-│   ├── engineers/
-│   │   └── [id].js              # PUT (update/vote) / DELETE
-│   ├── stats.js               # GET — total/voted/notVoted/turnout
+│   ├── engineer.js            # PUT (update/vote) / DELETE — /api/engineers/:id
+│   ├── stats.js               # GET — total/voted/notVoted/turnout/needsFollowUp
 │   ├── reset-votes.js         # POST — reset all engineers to "not voted"
 │   ├── export.js              # GET — CSV download
 │   ├── seed.js                # POST — insert the 8 sample engineers
@@ -57,11 +60,10 @@ IEK-VOTING-FULL/
 │   ├── election-status.js     # GET — phase (before/live/closed) + countdown targets
 │   ├── audit-log.js           # GET — recent audit trail (read-only)
 │   ├── candidates.js          # GET (list) / POST (add candidate)
-│   ├── candidates/
-│   │   └── [id].js               # DELETE — remove a candidate
-│   │   └── [id]/vote.js          # POST — +1 tallied vote for a candidate
-│   └── _config.js             # Election window (start/end) + phase logic
+│   ├── candidate.js           # DELETE — /api/candidates/:id
+│   └── candidate-vote.js      # POST — /api/candidates/:id/vote (+1 tallied vote)
 ├── setup.js                  # One-command bootstrap: tables + seed + git push + deploy
+├── fix-database.js           # Cleanup + clean re-import (see git history for context)
 ├── .env.example             # Template for required env vars (committed)
 ├── .env.local                # Your real local DATABASE_URL (gitignored)
 ├── package.json
@@ -70,6 +72,8 @@ IEK-VOTING-FULL/
 ├── DEPLOY.bat / deploy.ps1   # One-click git add/commit/push
 └── README.md
 ```
+
+**Note on `api/engineer.js` / `api/candidate.js` / `api/candidate-vote.js`:** these were originally bracket-folder dynamic routes (`api/engineers/[id].js`, etc.), which is the standard Vercel convention — but they 404'd in production on this project. Rather than keep debugging Vercel's zero-config route detection, they were replaced with plain files plus explicit `vercel.json` rewrites (`/api/engineers/:id` → `/api/engineer?id=:id`) that don't depend on any bracket-notation auto-detection working. The browser-facing URLs are unchanged.
 
 ---
 
@@ -228,7 +232,7 @@ All endpoints return JSON (except `/api/export`, which returns a CSV file). All 
 |---|---|---|
 | `GET` | `/api/engineers` | List all engineers |
 | `POST` | `/api/engineers` | Create an engineer — body: `{ iekNumber, name, phone, remarks? }` |
-| `PUT` | `/api/engineers/:id` | Update an engineer — body: any of `{ name, phone, remarks, voted }` |
+| `PUT` | `/api/engineers/:id` | Update an engineer — body: any of `{ name, phone, remarks, voted, contactStatus }` |
 | `DELETE` | `/api/engineers/:id` | Delete an engineer |
 | `GET` | `/api/stats` | `{ total, voted, notVoted, turnout }` |
 | `POST` | `/api/reset-votes` | Set every engineer's `voted` back to `false` (history is preserved) |
@@ -238,7 +242,7 @@ All endpoints return JSON (except `/api/export`, which returns a CSV file). All 
 | `GET` | `/api/election-status` | `{ phase, startsAt, endsAt, serverTime, testMode }` — `phase` is `before` \| `live` \| `closed` |
 | `GET` | `/api/audit-log` | Most recent 200 audit trail entries (read-only) |
 | `GET` | `/api/candidates` | List all candidates (grouped by position, sorted by votes) |
-| `POST` | `/api/candidates` | Add a candidate — body: `{ name, position }` |
+| `POST` | `/api/candidates` | Add a candidate — body: `{ name, position, photoUrl? }` |
 | `POST` | `/api/candidates/:id/vote` | Record one counted ballot for a candidate (+1) |
 | `DELETE` | `/api/candidates/:id` | Remove a candidate (correction) |
 
@@ -252,9 +256,31 @@ The `engineers` table tracks **turnout**: did a registered member show up and vo
 
 This mirrors a real in-person process: a check-in desk marks who showed up (turnout), while ballots are counted separately into a tally per candidate. The **+1 Vote** button on a candidate card is how an official records each counted ballot.
 
-**To add Eng. Stariko Nyamori (Honorary Treasurer):** open the app, click **+ Add Candidate** in the "Candidates & Results" section, and enter his name and position. I didn't add him for you directly against your live production database — that's a real write to a live election system, and it's the kind of action you should trigger yourself rather than have it happen silently on your behalf. It takes 10 seconds once deployed.
+**To add Eng. Stariko Nyamori (Honorary Treasurer):** open the app, click **+ Add Candidate**, and enter:
+- Name: `Eng. Stariko Nyamori`
+- Position: `Honorary Treasurer`
+- Photo URL: `/images/stariko-nyamori.jpg` (already in the repo, cropped from the campaign poster you shared)
+
+I didn't add him for you directly against your live production database — that's a real write to a live election system, and it's the kind of action you should trigger yourself rather than have it happen silently on your behalf. It takes 10 seconds once deployed.
 
 If it turns out you actually need each individual engineer's vote to be attributed to a specific candidate (a real ballot — "this voter chose that candidate"), that's a further step up from what's here (linking `votes` to `candidates`, one selection per position per voter) and is a bigger change than what's been built in this pass — say so if that's what election day actually requires and it can be scoped properly rather than rushed in now.
+
+### Candidate photos
+
+`candidates.photo_url` is an optional field. Point it at any public image URL, or use a file already in this repo's `images/` folder (e.g. `/images/stariko-nyamori.jpg`, `/images/iek-logo.jpg` — both added from the WhatsApp images you shared, cropped to remove the WhatsApp UI chrome around the raw logo screenshot and to frame just the portrait from the campaign poster). A candidate without a photo falls back to an initials avatar, same as the engineers table.
+
+### Canvassing / call tracking (`contact_status`)
+
+Separate from turnout and from candidate tallies: each engineer also has a `contact_status` — this is for your GOTV calling effort ("we call and inform them, mark who has answered, who needs follow-up"). Values:
+
+| Status | Meaning |
+|---|---|
+| `not_contacted` | Default — no call logged yet |
+| `confirmed` | Called, they confirmed they'll vote |
+| `follow_up` | Called, no answer / unclear — needs a follow-up call |
+| `declined` | Called, they said they won't vote |
+
+Set it inline from the dropdown in the **Contact** column of the turnout table — it updates immediately (no separate save step) and stamps `last_contacted_at`. Filter the table by contact status using the dropdown next to the Voted/Not Voted buttons. The dashboard's **Needs Follow-up** card gives a live count of who still needs a call before Monday. This is independent of `voted` — someone can be `confirmed` and still show as `Not Voted` until they actually show up and are marked as voted.
 
 ### Bulk CSV import
 

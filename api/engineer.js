@@ -29,7 +29,12 @@ export default async function handler(req, res) {
     const ip = getClientIp(req);
 
     if (req.method === "PUT") {
-      const { name, phone, remarks, voted } = req.body || {};
+      const { name, phone, remarks, voted, contactStatus } = req.body || {};
+
+      const VALID_CONTACT_STATUSES = ["not_contacted", "confirmed", "follow_up", "declined"];
+      if (contactStatus !== undefined && !VALID_CONTACT_STATUSES.includes(contactStatus)) {
+        return res.status(400).json({ error: `contactStatus must be one of: ${VALID_CONTACT_STATUSES.join(", ")}` });
+      }
 
       const nextName = name !== undefined ? name : existing.name;
       const nextPhone = phone !== undefined ? phone : existing.phone;
@@ -37,6 +42,10 @@ export default async function handler(req, res) {
       const nextVoted = voted !== undefined ? Boolean(voted) : existing.voted;
       const votedChanged = voted !== undefined && nextVoted !== existing.voted;
       const isCastingNewVote = votedChanged && nextVoted;
+
+      const nextContactStatus = contactStatus !== undefined ? contactStatus : existing.contact_status;
+      const contactStatusChanged = contactStatus !== undefined && contactStatus !== existing.contact_status;
+      const nextLastContactedAt = contactStatusChanged ? new Date().toISOString() : existing.last_contacted_at;
 
       // Only the act of CASTING a vote is time-gated. Undoing a vote (admin
       // correction) and editing name/phone/remarks work at any time, since
@@ -57,9 +66,11 @@ export default async function handler(req, res) {
             phone = ${nextPhone},
             remarks = ${nextRemarks},
             voted = ${nextVoted},
+            contact_status = ${nextContactStatus},
+            last_contacted_at = ${nextLastContactedAt},
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ${engineerId}
-        RETURNING id, iek_number, name, phone, voted, remarks, created_at, updated_at
+        RETURNING id, iek_number, name, phone, voted, remarks, contact_status, last_contacted_at, created_at, updated_at
       `;
 
       if (isCastingNewVote) {
@@ -67,6 +78,8 @@ export default async function handler(req, res) {
         await logAudit(sql, "VOTE", engineerId, ip);
       } else if (votedChanged && !nextVoted) {
         await logAudit(sql, "UNDO_VOTE", engineerId, ip);
+      } else if (contactStatusChanged) {
+        await logAudit(sql, `CONTACT_${nextContactStatus.toUpperCase()}`, engineerId, ip);
       } else {
         await logAudit(sql, "UPDATE", engineerId, ip);
       }

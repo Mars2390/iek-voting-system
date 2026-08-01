@@ -22,7 +22,7 @@
 <header class="site-header">
   <div class="container header-inner">
     <div class="brand">
-      <div class="brand-shield">IEK</div>
+      <img class="brand-shield" src="/images/iek-logo.jpg" alt="IEK logo">
       <div class="brand-text">
         <h1>IEK Online Voting System</h1>
         <p>Institution of Engineers of Kenya &mdash; Voter Turnout Portal</p>
@@ -36,6 +36,7 @@
           <span class="bell-badge" id="bellBadge" hidden>0</span>
         </button>
         <div class="notification-dropdown" id="notificationDropdown" hidden>
+          <span class="notification-caret" aria-hidden="true"></span>
           <div class="notification-dropdown-header">Recent Activity</div>
           <div id="notificationList" class="notification-list">
             <p class="notification-empty">No activity yet.</p>
@@ -86,6 +87,13 @@
         <span class="stat-label">Voter Turnout</span>
       </div>
     </div>
+    <div class="stat-card stat-amber">
+      <div class="stat-icon">&#128222;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statFollowUp">0</span>
+        <span class="stat-label">Needs Follow-up</span>
+      </div>
+    </div>
   </section>
 
   <div class="turnout-bar-wrap">
@@ -112,11 +120,19 @@
         <input type="text" id="searchInput" placeholder="Search by name, IEK number or phone...">
       </div>
 
-      <div class="filter-group" role="group" aria-label="Filter by status">
+      <div class="filter-group" role="group" aria-label="Filter by voted status">
         <button class="filter-btn active" data-filter="all" type="button">All</button>
         <button class="filter-btn" data-filter="voted" type="button">Voted</button>
         <button class="filter-btn" data-filter="not-voted" type="button">Not Voted</button>
       </div>
+
+      <select id="contactFilter" class="filter-select" aria-label="Filter by contact status">
+        <option value="">Any contact status</option>
+        <option value="not_contacted">Not Contacted</option>
+        <option value="confirmed">Confirmed will vote</option>
+        <option value="follow_up">Needs Follow-up</option>
+        <option value="declined">Declined</option>
+      </select>
     </div>
 
     <div class="controls-row controls-row-actions">
@@ -189,6 +205,10 @@
           <label for="candidatePosition">Position *</label>
           <input type="text" id="candidatePosition" required placeholder="e.g. Honorary Treasurer">
         </div>
+        <div class="form-field">
+          <label for="candidatePhotoUrl">Photo URL</label>
+          <input type="text" id="candidatePhotoUrl" placeholder="e.g. /images/stariko-nyamori.jpg (optional)">
+        </div>
       </div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">Add Candidate</button>
@@ -247,6 +267,7 @@
             <th>Phone</th>
             <th>Status</th>
             <th>Voted At</th>
+            <th>Contact</th>
             <th>Remarks</th>
             <th>Actions</th>
           </tr>
