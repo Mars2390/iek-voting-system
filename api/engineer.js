@@ -2,13 +2,21 @@ import { getSql } from "./_db.js";
 import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 import { getElectionPhase } from "./_config.js";
 
-// PUT    /api/engineers/:id -> update name/phone/remarks and/or voted status
+// PUT    /api/engineers/:id -> update name/phone and/or cast a vote
 // DELETE /api/engineers/:id -> remove an engineer
 //
 // This file is deployed at /api/engineer (no brackets). vercel.json rewrites
 // /api/engineers/:id -> /api/engineer?id=:id so the browser-facing URL stays
 // the same; see the note in vercel.json for why this replaced a bracket-
 // folder dynamic route ([id].js), which 404'd in production.
+//
+// NOTE: contact_status is no longer settable here — POST /api/contact-calls
+// is the single place that changes it now, so every status change (whether
+// from the quick per-row dropdown or the full "Log Call" form) always
+// produces a matching contact_calls row and call_count increment. Remarks
+// similarly moved to POST /api/remarks (authored, timestamped, one row per
+// note) — the `remarks` column here is frozen legacy text from before that
+// table existed and is no longer written to by the app.
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -29,27 +37,25 @@ export default async function handler(req, res) {
     const ip = getClientIp(req);
 
     if (req.method === "PUT") {
-      const { name, phone, remarks, voted, contactStatus } = req.body || {};
+      const { name, phone, voted } = req.body || {};
 
-      const VALID_CONTACT_STATUSES = ["not_contacted", "confirmed", "follow_up", "declined"];
-      if (contactStatus !== undefined && !VALID_CONTACT_STATUSES.includes(contactStatus)) {
-        return res.status(400).json({ error: `contactStatus must be one of: ${VALID_CONTACT_STATUSES.join(", ")}` });
+      // Election integrity: once cast, a vote cannot be reversed through
+      // this endpoint. (If test votes need clearing before election day,
+      // use POST /api/reset-votes — a deliberate bulk/admin action, not a
+      // per-row undo click.)
+      if (voted === false && existing.voted === true) {
+        return res.status(403).json({
+          error: "Votes cannot be reversed once cast. If this was test data, use Reset All Votes before election day.",
+        });
       }
 
       const nextName = name !== undefined ? name : existing.name;
       const nextPhone = phone !== undefined ? phone : existing.phone;
-      const nextRemarks = remarks !== undefined ? remarks : existing.remarks;
       const nextVoted = voted !== undefined ? Boolean(voted) : existing.voted;
-      const votedChanged = voted !== undefined && nextVoted !== existing.voted;
-      const isCastingNewVote = votedChanged && nextVoted;
+      const isCastingNewVote = voted === true && !existing.voted;
 
-      const nextContactStatus = contactStatus !== undefined ? contactStatus : existing.contact_status;
-      const contactStatusChanged = contactStatus !== undefined && contactStatus !== existing.contact_status;
-      const nextLastContactedAt = contactStatusChanged ? new Date().toISOString() : existing.last_contacted_at;
-
-      // Only the act of CASTING a vote is time-gated. Undoing a vote (admin
-      // correction) and editing name/phone/remarks work at any time, since
-      // those are administrative/setup actions, not "casting a ballot."
+      // Only the act of CASTING a vote is time-gated. Editing name/phone
+      // works at any time — that's setup/admin work, not "casting a ballot."
       if (isCastingNewVote) {
         const phase = getElectionPhase();
         if (phase !== "live") {
@@ -64,22 +70,16 @@ export default async function handler(req, res) {
         UPDATE engineers
         SET name = ${nextName},
             phone = ${nextPhone},
-            remarks = ${nextRemarks},
             voted = ${nextVoted},
-            contact_status = ${nextContactStatus},
-            last_contacted_at = ${nextLastContactedAt},
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ${engineerId}
-        RETURNING id, iek_number, name, phone, voted, remarks, contact_status, last_contacted_at, created_at, updated_at
+        RETURNING id, iek_number, name, phone, voted, remarks, contact_status,
+                  last_contacted_at, call_count, confirmed_vote, created_at, updated_at
       `;
 
       if (isCastingNewVote) {
         await sql`INSERT INTO votes (engineer_id, voter_ip) VALUES (${engineerId}, ${ip})`;
         await logAudit(sql, "VOTE", engineerId, ip);
-      } else if (votedChanged && !nextVoted) {
-        await logAudit(sql, "UNDO_VOTE", engineerId, ip);
-      } else if (contactStatusChanged) {
-        await logAudit(sql, `CONTACT_${nextContactStatus.toUpperCase()}`, engineerId, ip);
       } else {
         await logAudit(sql, "UPDATE", engineerId, ip);
       }

@@ -12,6 +12,24 @@
   const POLL_INTERVAL_MS = 5000;
   const COUNTDOWN_TICK_MS = 1000;
   const MAX_NOTIFICATIONS = 40;
+  const IDENTITY_KEY = "iek_caller_name";
+
+  const CONTACT_STATUS_LABELS = {
+    pending: "Pending",
+    confirmed: "Called & Confirmed",
+    no_answer: "Called - No Answer",
+    busy_declined: "Called - Busy/Declined",
+    follow_up: "Follow-up Needed",
+    not_reachable: "Not Reachable",
+  };
+  const CONTACT_STATUS_ICONS = {
+    pending: "📝",
+    confirmed: "✅",
+    no_answer: "📞",
+    busy_declined: "📱",
+    follow_up: "🔄",
+    not_reachable: "❌",
+  };
 
   let engineers = [];
   let engineersById = new Map();
@@ -19,8 +37,9 @@
   let candidatesById = new Map();
   let hasLoadedOnce = false;
   let activeFilter = "all"; // all | voted | not-voted
-  let activeContactFilter = ""; // "" | not_contacted | confirmed | follow_up | declined
+  let activeContactFilter = ""; // "" | pending | confirmed | no_answer | busy_declined | follow_up | not_reachable
   let isBusy = false;
+  let selectedIds = new Set();
 
   let electionStatus = null; // { phase, startsAt, endsAt, serverTime, testMode }
   let notifications = [];
@@ -28,6 +47,7 @@
 
   let pollTimer = null;
   let countdownTimer = null;
+  let callModalStatus = null;
 
   // ---------- DOM references ----------
   const el = {
@@ -46,10 +66,12 @@
     importCsvBtn: document.getElementById("importCsvBtn"),
     importCsvInput: document.getElementById("importCsvInput"),
     exportCsvBtn: document.getElementById("exportCsvBtn"),
+    exportDropdown: document.getElementById("exportDropdown"),
     printBtn: document.getElementById("printBtn"),
     resetVotesBtn: document.getElementById("resetVotesBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
     lastUpdated: document.getElementById("lastUpdated"),
+    lastActivity: document.getElementById("lastActivity"),
     toast: document.getElementById("toast"),
     statTotal: document.getElementById("statTotal"),
     statVoted: document.getElementById("statVoted"),
@@ -80,6 +102,48 @@
     candidateForm: document.getElementById("candidateForm"),
     candidatesGrid: document.getElementById("candidatesGrid"),
     candidatesEmpty: document.getElementById("candidatesEmpty"),
+    identityBadge: document.getElementById("identityBadge"),
+    identityName: document.getElementById("identityName"),
+    quickNavBtns: document.querySelectorAll(".quick-nav-btn"),
+    urgentNavBadge: document.getElementById("urgentNavBadge"),
+    selectAllCheckbox: document.getElementById("selectAllCheckbox"),
+    bulkBar: document.getElementById("bulkBar"),
+    bulkCount: document.getElementById("bulkCount"),
+    bulkStatusSelect: document.getElementById("bulkStatusSelect"),
+    bulkApplyBtn: document.getElementById("bulkApplyBtn"),
+    bulkExportBtn: document.getElementById("bulkExportBtn"),
+    bulkPrintBtn: document.getElementById("bulkPrintBtn"),
+    bulkClearBtn: document.getElementById("bulkClearBtn"),
+    urgentTableBody: document.getElementById("urgentTableBody"),
+    urgentEmpty: document.getElementById("urgentEmpty"),
+    urgentCount: document.getElementById("urgentCount"),
+    agendaTableBody: document.getElementById("agendaTableBody"),
+    agendaEmpty: document.getElementById("agendaEmpty"),
+    agendaCount: document.getElementById("agendaCount"),
+    anaTotal: document.getElementById("anaTotal"),
+    anaConfirmed: document.getElementById("anaConfirmed"),
+    anaNoAnswer: document.getElementById("anaNoAnswer"),
+    anaFollowUp: document.getElementById("anaFollowUp"),
+    anaNotReachable: document.getElementById("anaNotReachable"),
+    anaPending: document.getElementById("anaPending"),
+    anaTurnout: document.getElementById("anaTurnout"),
+    pieChart: document.getElementById("pieChart"),
+    pieChartLegend: document.getElementById("pieChartLegend"),
+    barChart: document.getElementById("barChart"),
+    lineChart: document.getElementById("lineChart"),
+    callModalOverlay: document.getElementById("callModalOverlay"),
+    callModalName: document.getElementById("callModalName"),
+    callModalPhone: document.getElementById("callModalPhone"),
+    callEngineerId: document.getElementById("callEngineerId"),
+    callForm: document.getElementById("callForm"),
+    callNotes: document.getElementById("callNotes"),
+    callSubmitBtn: document.getElementById("callSubmitBtn"),
+    callCancelBtn: document.getElementById("callCancelBtn"),
+    callModalClose: document.getElementById("callModalClose"),
+    detailsModalOverlay: document.getElementById("detailsModalOverlay"),
+    detailsModalName: document.getElementById("detailsModalName"),
+    detailsModalBody: document.getElementById("detailsModalBody"),
+    detailsModalClose: document.getElementById("detailsModalClose"),
   };
 
   // ---------- Utilities ----------
@@ -130,6 +194,37 @@
     document.body.classList.toggle("is-busy", busy);
   }
 
+  function markActivity() {
+    el.lastActivity.textContent = `Last activity: ${new Date().toLocaleTimeString()}`;
+  }
+
+  // ---------- Identity (self-reported, NOT authentication) ----------
+  // There is no login system in this app. This is just a per-browser label
+  // so call logs / remarks show a human name instead of "anonymous" — it is
+  // not verified and can't be trusted the way a real logged-in user would be.
+  function getIdentity() {
+    return (localStorage.getItem(IDENTITY_KEY) || "").trim();
+  }
+
+  function setIdentity(name) {
+    localStorage.setItem(IDENTITY_KEY, name.trim());
+    renderIdentityBadge();
+  }
+
+  function renderIdentityBadge() {
+    const name = getIdentity();
+    el.identityName.textContent = name || "Set your name";
+  }
+
+  function ensureIdentity() {
+    let name = getIdentity();
+    if (!name) {
+      name = (prompt("Your name (shown on every call log / remark you add):") || "").trim();
+      if (name) setIdentity(name);
+    }
+    return name;
+  }
+
   // ---------- API layer ----------
   async function apiFetch(url, options) {
     let response;
@@ -173,6 +268,15 @@
   async function fetchCandidates() {
     const data = await apiFetch("/api/candidates");
     return data.candidates;
+  }
+
+  async function fetchUrgent() {
+    const data = await apiFetch("/api/urgent");
+    return data.urgent;
+  }
+
+  async function fetchAnalytics() {
+    return apiFetch("/api/analytics");
   }
 
   // ---------- Notifications ----------
@@ -340,14 +444,7 @@
     });
   }
 
-  const CONTACT_STATUS_LABELS = {
-    not_contacted: "Not Contacted",
-    confirmed: "Confirmed",
-    follow_up: "Needs Follow-up",
-    declined: "Declined",
-  };
-
-  // ---------- Render ----------
+  // ---------- Render: main turnout table ----------
   function render() {
     const list = getFiltered();
     const votingIsLive = electionStatus?.phase === "live";
@@ -362,13 +459,11 @@
 
       el.tableBody.innerHTML = list.map((e) => {
         const voted = !!e.voted;
-        const remarks = e.remarks ? escapeHtml(e.remarks) : '<span class="remarks-text empty">No remarks</span>';
+        const status = e.contact_status || "pending";
 
         let voteAction;
         if (voted) {
-          voteAction = `
-            <span class="voted-pill">&#9989; ALREADY VOTED</span>
-            <button class="btn-undo" data-action="undo" data-id="${e.id}" title="Admin correction">Undo</button>`;
+          voteAction = `<span class="voted-pill">&#9989; VOTED at ${formatDateTime(e.voted_at)}</span>`;
         } else if (votingIsLive) {
           voteAction = `<button class="btn-vote" data-action="vote" data-id="${e.id}">&#128499;&#65039; VOTE</button>`;
         } else {
@@ -377,7 +472,8 @@
         }
 
         return `
-        <tr data-id="${e.id}" class="${voted ? "row-voted" : "row-not-voted"}">
+        <tr data-id="${e.id}" class="${voted ? "row-voted" : "row-not-voted"} ${e.needs_followup ? "row-urgent" : ""}">
+          <td><input type="checkbox" class="row-checkbox" data-id="${e.id}" ${selectedIds.has(String(e.id)) ? "checked" : ""}></td>
           <td><span class="iek-number">${escapeHtml(e.iek_number)}</span></td>
           <td>
             <div class="candidate-cell">
@@ -393,17 +489,18 @@
           </td>
           <td class="voted-timestamp">${voted && e.voted_at ? formatDateTime(e.voted_at) : "—"}</td>
           <td>
-            <select class="contact-select ${e.contact_status || "not_contacted"}" data-action="contact-status" data-id="${e.id}" title="${e.last_contacted_at ? `Last contacted: ${formatDateTime(e.last_contacted_at)}` : "Never contacted"}">
+            <select class="contact-select ${status}" data-action="contact-status" data-id="${e.id}" title="${e.last_contacted_at ? `Last contacted: ${formatDateTime(e.last_contacted_at)}` : "Never contacted"} · ${e.call_count || 0} call(s)">
               ${Object.entries(CONTACT_STATUS_LABELS).map(([value, label]) =>
-                `<option value="${value}" ${(e.contact_status || "not_contacted") === value ? "selected" : ""}>${label}</option>`
+                `<option value="${value}" ${status === value ? "selected" : ""}>${CONTACT_STATUS_ICONS[value]} ${label}</option>`
               ).join("")}
             </select>
           </td>
-          <td class="remarks-cell">${e.remarks ? `<span class="remarks-text">${remarks}</span>` : remarks}</td>
           <td>
             <div class="actions-cell">
               ${voteAction}
-              <button class="btn-icon-sm" data-action="remarks" data-id="${e.id}">Remarks</button>
+              <button class="btn-icon-sm" data-action="call" data-id="${e.id}">&#128222; Call</button>
+              <button class="btn-icon-sm" data-action="never-picked-up" data-id="${e.id}" title="Quick-log: No Answer">&#128222; Never Picked Up</button>
+              <button class="btn-icon-sm" data-action="details" data-id="${e.id}">&#128065; Details</button>
               <button class="btn-icon-sm" data-action="edit" data-id="${e.id}">Edit</button>
               <button class="btn-delete" data-action="delete" data-id="${e.id}">Remove</button>
             </div>
@@ -411,6 +508,8 @@
         </tr>`;
       }).join("");
     }
+
+    renderBulkBar();
   }
 
   function renderStats(stats) {
@@ -458,6 +557,275 @@
     }).join("");
   }
 
+  // ---------- Bulk selection ----------
+  function renderBulkBar() {
+    el.bulkBar.hidden = selectedIds.size === 0;
+    el.bulkCount.textContent = `${selectedIds.size} selected`;
+    const visibleIds = getFiltered().map((e) => String(e.id));
+    el.selectAllCheckbox.checked = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  }
+
+  function toggleRowSelection(id, checked) {
+    if (checked) selectedIds.add(String(id));
+    else selectedIds.delete(String(id));
+    renderBulkBar();
+  }
+
+  function selectAllVisible(checked) {
+    const visibleIds = getFiltered().map((e) => String(e.id));
+    if (checked) visibleIds.forEach((id) => selectedIds.add(id));
+    else visibleIds.forEach((id) => selectedIds.delete(id));
+    render();
+  }
+
+  async function bulkApplyStatus() {
+    const status = el.bulkStatusSelect.value;
+    const caller = ensureIdentity();
+    if (!caller) { showToast("Enter your name first to log calls.", true); return; }
+    if (!confirm(`Mark ${selectedIds.size} engineer(s) as "${CONTACT_STATUS_LABELS[status]}"?`)) return;
+
+    setBusy(true);
+    try {
+      await Promise.all(Array.from(selectedIds).map((id) =>
+        apiFetch("/api/contact-calls", {
+          method: "POST",
+          body: JSON.stringify({ engineerId: Number(id), callerName: caller, callStatus: status }),
+        }).catch(() => null)
+      ));
+      showToast(`Updated ${selectedIds.size} engineer(s).`);
+      markActivity();
+      selectedIds.clear();
+      await loadAll({ silent: true });
+      await loadUrgentAndAnalytics();
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function bulkExportSelected() {
+    const rows = engineers.filter((e) => selectedIds.has(String(e.id)));
+    if (rows.length === 0) return;
+    const headers = ["IEK Number", "Name", "Phone", "Voted", "Contact Status", "Call Count", "Last Contacted"];
+    const csvEscape = (v) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [headers, ...rows.map((e) => [
+      e.iek_number, e.name, e.phone || "", e.voted ? "Voted" : "Not Voted",
+      e.contact_status, e.call_count || 0, e.last_contacted_at ? formatDateTime(e.last_contacted_at) : "",
+    ])].map((r) => r.map(csvEscape).join(",")).join("\r\n");
+
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `IEK_Selected_Engineers_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function bulkPrintCallList() {
+    const rows = engineers.filter((e) => selectedIds.has(String(e.id)));
+    if (rows.length === 0) return;
+    const win = window.open("", "_blank");
+    win.document.write(`
+      <html><head><title>Call List — ${new Date().toLocaleDateString()}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 13px; }
+        th { background: #0a0a0a; color: #fff; }
+      </style></head><body>
+      <h2>IEK Call List — ${new Date().toLocaleString()}</h2>
+      <table><thead><tr><th>Name</th><th>Phone</th><th>Status</th><th>Notes</th></tr></thead><tbody>
+      ${rows.map((e) => `<tr><td>${escapeHtml(e.name)}</td><td>${escapeHtml(e.phone || "")}</td><td>${CONTACT_STATUS_LABELS[e.contact_status] || ""}</td><td></td></tr>`).join("")}
+      </tbody></table>
+      </body></html>
+    `);
+    win.document.close();
+    win.focus();
+    win.print();
+  }
+
+  // ---------- Urgent ----------
+  function renderUrgent(urgent) {
+    el.urgentCount.textContent = `${urgent.length} flagged`;
+    el.urgentNavBadge.hidden = urgent.length === 0;
+    el.urgentNavBadge.textContent = urgent.length > 9 ? "9+" : String(urgent.length);
+
+    if (urgent.length === 0) {
+      el.urgentTableBody.innerHTML = "";
+      el.urgentEmpty.hidden = false;
+      return;
+    }
+    el.urgentEmpty.hidden = true;
+
+    el.urgentTableBody.innerHTML = urgent.map((e) => {
+      const reasons = [];
+      if (e.reason_many_calls) reasons.push("3+ calls");
+      if (e.reason_status) reasons.push(CONTACT_STATUS_LABELS[e.contact_status] || e.contact_status);
+      if (e.reason_stale_remarks) reasons.push("No remark in 2 days");
+
+      return `
+        <tr data-id="${e.id}">
+          <td>${escapeHtml(e.name)}</td>
+          <td>${e.phone ? `<a class="phone-prominent" href="tel:${escapeHtml(e.phone)}">${escapeHtml(e.phone)}</a>` : "—"}</td>
+          <td><span class="status-badge not-voted">${CONTACT_STATUS_ICONS[e.contact_status] || ""} ${CONTACT_STATUS_LABELS[e.contact_status] || e.contact_status}</span></td>
+          <td>${e.call_count || 0}</td>
+          <td>${e.last_contacted_at ? formatDateTime(e.last_contacted_at) : "Never"}</td>
+          <td><div class="reason-tags">${reasons.map((r) => `<span class="reason-tag">${escapeHtml(r)}</span>`).join("")}</div></td>
+          <td><button class="btn-icon-sm" data-action="call" data-id="${e.id}">&#128222; Call Now</button></td>
+        </tr>`;
+    }).join("");
+  }
+
+  // ---------- Today's Agenda (client-computed from the loaded engineers list) ----------
+  function renderAgenda() {
+    const list = engineers
+      .filter((e) => !e.voted && e.contact_status !== "confirmed")
+      .sort((a, b) => {
+        const at = a.last_contacted_at ? new Date(a.last_contacted_at).getTime() : 0;
+        const bt = b.last_contacted_at ? new Date(b.last_contacted_at).getTime() : 0;
+        return at - bt; // never-contacted (0) first, then oldest contact first
+      })
+      .slice(0, 50);
+
+    el.agendaCount.textContent = `${list.length} to call`;
+
+    if (list.length === 0) {
+      el.agendaTableBody.innerHTML = "";
+      el.agendaEmpty.hidden = false;
+      return;
+    }
+    el.agendaEmpty.hidden = true;
+
+    el.agendaTableBody.innerHTML = list.map((e) => `
+      <tr data-id="${e.id}">
+        <td>${escapeHtml(e.name)}</td>
+        <td>${e.phone ? `<a class="phone-prominent" href="tel:${escapeHtml(e.phone)}">${escapeHtml(e.phone)}</a>` : "—"}</td>
+        <td><span class="status-badge not-voted">${CONTACT_STATUS_ICONS[e.contact_status] || ""} ${CONTACT_STATUS_LABELS[e.contact_status] || e.contact_status}</span></td>
+        <td>${e.last_contacted_at ? formatDateTime(e.last_contacted_at) : "Never"}</td>
+        <td><button class="btn-icon-sm" data-action="call" data-id="${e.id}">&#128222; Call</button></td>
+      </tr>
+    `).join("");
+  }
+
+  // ---------- Analytics (hand-rolled SVG — no external chart library) ----------
+  const STATUS_COLORS = {
+    pending: "#b8860b",
+    confirmed: "#007a3d",
+    no_answer: "#1d5fa8",
+    busy_declined: "#5b7fb5",
+    follow_up: "#b5540a",
+    not_reachable: "#bb0a1e",
+  };
+
+  function buildPieChart(statusCounts) {
+    const entries = Object.entries(statusCounts).filter(([, v]) => v > 0);
+    const total = entries.reduce((s, [, v]) => s + v, 0);
+    if (total === 0) {
+      el.pieChart.innerHTML = '<p class="notification-empty">No data yet.</p>';
+      el.pieChartLegend.innerHTML = "";
+      return;
+    }
+
+    const cx = 100, cy = 100, r = 90;
+    let angle = -90;
+    const paths = entries.map(([status, count]) => {
+      const slice = (count / total) * 360;
+      const x1 = cx + r * Math.cos((Math.PI * angle) / 180);
+      const y1 = cy + r * Math.sin((Math.PI * angle) / 180);
+      angle += slice;
+      const x2 = cx + r * Math.cos((Math.PI * angle) / 180);
+      const y2 = cy + r * Math.sin((Math.PI * angle) / 180);
+      const largeArc = slice > 180 ? 1 : 0;
+      return `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${largeArc} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${STATUS_COLORS[status]}" />`;
+    }).join("");
+
+    el.pieChart.innerHTML = `<svg viewBox="0 0 200 200">${paths}</svg>`;
+    el.pieChartLegend.innerHTML = entries.map(([status, count]) => `
+      <span class="chart-legend-item">
+        <span class="chart-legend-swatch" style="background:${STATUS_COLORS[status]}"></span>
+        ${CONTACT_STATUS_LABELS[status]}: ${count}
+      </span>
+    `).join("");
+  }
+
+  function buildBarChart(dailyData, color) {
+    if (!dailyData || dailyData.length === 0) {
+      el.barChart.innerHTML = '<p class="notification-empty">No calls logged in the last 7 days.</p>';
+      return;
+    }
+    const max = Math.max(...dailyData.map((d) => d.count), 1);
+    const barWidth = 100 / dailyData.length;
+    const bars = dailyData.map((d, i) => {
+      const h = (d.count / max) * 140;
+      const x = i * barWidth + barWidth * 0.15;
+      const w = barWidth * 0.7;
+      const y = 160 - h;
+      const label = d.date.slice(5); // MM-DD
+      return `
+        <rect x="${x}%" y="${y}" width="${w}%" height="${h}" fill="${color}" rx="2"></rect>
+        <text x="${(x + w / 2)}%" y="175" font-size="9" text-anchor="middle" fill="#6b7280">${label}</text>
+        <text x="${(x + w / 2)}%" y="${y - 4}" font-size="10" text-anchor="middle" fill="#1b1d22">${d.count}</text>
+      `;
+    }).join("");
+    el.barChart.innerHTML = `<svg viewBox="0 0 300 190" preserveAspectRatio="none">${bars}</svg>`;
+  }
+
+  function buildLineChart(dailyData, color) {
+    if (!dailyData || dailyData.length === 0) {
+      el.lineChart.innerHTML = '<p class="notification-empty">No confirmations logged in the last 7 days.</p>';
+      return;
+    }
+    const max = Math.max(...dailyData.map((d) => d.count), 1);
+    const stepX = dailyData.length > 1 ? 280 / (dailyData.length - 1) : 0;
+    const points = dailyData.map((d, i) => {
+      const x = 10 + i * stepX;
+      const y = 150 - (d.count / max) * 130;
+      return { x, y, count: d.count, date: d.date };
+    });
+    const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+    const dots = points.map((p) => `
+      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" fill="${color}"></circle>
+      <text x="${p.x.toFixed(1)}" y="${(p.y - 8).toFixed(1)}" font-size="10" text-anchor="middle" fill="#1b1d22">${p.count}</text>
+      <text x="${p.x.toFixed(1)}" y="168" font-size="9" text-anchor="middle" fill="#6b7280">${p.date.slice(5)}</text>
+    `).join("");
+
+    el.lineChart.innerHTML = `<svg viewBox="0 0 300 180" preserveAspectRatio="none">
+      <path d="${linePath}" fill="none" stroke="${color}" stroke-width="2"></path>
+      ${dots}
+    </svg>`;
+  }
+
+  function renderAnalytics(data) {
+    el.anaTotal.textContent = data.total;
+    el.anaConfirmed.textContent = data.statusCounts.confirmed;
+    el.anaNoAnswer.textContent = data.statusCounts.no_answer + data.statusCounts.busy_declined;
+    el.anaFollowUp.textContent = data.statusCounts.follow_up;
+    el.anaNotReachable.textContent = data.statusCounts.not_reachable;
+    el.anaPending.textContent = data.statusCounts.pending;
+    el.anaTurnout.textContent = `${data.turnout}%`;
+
+    buildPieChart(data.statusCounts);
+    buildBarChart(data.dailyCalls, "#0a0a0a");
+    buildLineChart(data.dailyConfirmations, "#007a3d");
+  }
+
+  async function loadUrgentAndAnalytics() {
+    try {
+      const [urgent, analytics] = await Promise.all([fetchUrgent(), fetchAnalytics()]);
+      renderUrgent(urgent);
+      renderAnalytics(analytics);
+    } catch (err) {
+      // Non-fatal — main table still works even if this secondary data fails.
+    }
+  }
+
   // ---------- Load everything from the API ----------
   async function loadAll({ silent, isPoll } = {}) {
     try {
@@ -480,6 +848,7 @@
       render();
       renderStats(stats);
       renderCandidates();
+      renderAgenda();
       el.lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
       if (!silent) showToast("Data refreshed from the database.");
     } catch (err) {
@@ -491,7 +860,10 @@
   // ---------- Polling ----------
   function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => loadAll({ silent: true, isPoll: true }), POLL_INTERVAL_MS);
+    pollTimer = setInterval(async () => {
+      await loadAll({ silent: true, isPoll: true });
+      await loadUrgentAndAnalytics();
+    }, POLL_INTERVAL_MS);
   }
 
   function startCountdownTicking() {
@@ -521,7 +893,6 @@
     document.getElementById("iekNumber").value = e.iek_number;
     document.getElementById("fullName").value = e.name;
     document.getElementById("phone").value = e.phone || "";
-    document.getElementById("remarks").value = e.remarks || "";
     el.formTitle.textContent = `Edit Engineer — ${e.name}`;
     el.formSubmitBtn.textContent = "Update Engineer";
     el.formPanel.hidden = false;
@@ -542,7 +913,6 @@
     const iekNumber = document.getElementById("iekNumber").value.trim();
     const name = document.getElementById("fullName").value.trim();
     const phone = document.getElementById("phone").value.trim();
-    const remarks = document.getElementById("remarks").value.trim();
 
     if (!iekNumber || !name) {
       showToast("IEK Number and Name are required.", true);
@@ -554,17 +924,18 @@
       if (id) {
         await apiFetch(`/api/engineers/${id}`, {
           method: "PUT",
-          body: JSON.stringify({ name, phone, remarks }),
+          body: JSON.stringify({ name, phone }),
         });
         showToast(`${name} updated successfully.`);
       } else {
         await apiFetch("/api/engineers", {
           method: "POST",
-          body: JSON.stringify({ iekNumber, name, phone, remarks }),
+          body: JSON.stringify({ iekNumber, name, phone }),
         });
         showToast(`${name} registered successfully.`);
       }
       closeForm();
+      markActivity();
       await loadAll({ silent: true });
     } catch (err) {
       showToast(err.message, true);
@@ -583,6 +954,8 @@
     try {
       await apiFetch(`/api/engineers/${id}`, { method: "DELETE" });
       showToast(`${e.name} has been removed.`);
+      selectedIds.delete(String(id));
+      markActivity();
       await loadAll({ silent: true });
     } catch (err) {
       showToast(err.message, true);
@@ -594,7 +967,7 @@
   async function markVoted(id) {
     const e = engineers.find((x) => String(x.id) === String(id));
     if (!e || e.voted) return;
-    if (!confirm(`Confirm that ${e.name} (${e.iek_number}) has cast their vote?`)) return;
+    if (!confirm(`Confirm that ${e.name} (${e.iek_number}) has cast their vote? This cannot be undone.`)) return;
 
     setBusy(true);
     try {
@@ -602,8 +975,10 @@
         method: "PUT",
         body: JSON.stringify({ voted: true }),
       });
-      showToast(`${e.name} marked as Voted.`);
+      showToast(`✅ ${e.name} has voted!`);
+      markActivity();
       await loadAll({ silent: true });
+      await loadUrgentAndAnalytics();
     } catch (err) {
       showToast(err.message, true);
       await refreshElectionStatus(); // in case the window just closed/hasn't opened
@@ -612,59 +987,22 @@
     }
   }
 
-  async function undoVote(id) {
+  async function quickSetContactStatus(id, status) {
     const e = engineers.find((x) => String(x.id) === String(id));
     if (!e) return;
-    if (!confirm(`Undo voting status for ${e.name} (${e.iek_number})?`)) return;
+    const caller = ensureIdentity();
+    if (!caller) { showToast("Enter your name first to log a call.", true); render(); return; }
 
     setBusy(true);
     try {
-      await apiFetch(`/api/engineers/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ voted: false }),
+      await apiFetch("/api/contact-calls", {
+        method: "POST",
+        body: JSON.stringify({ engineerId: Number(id), callerName: caller, callStatus: status }),
       });
-      showToast(`Voting status reverted for ${e.name}.`);
+      showToast(`${e.name}: marked as "${CONTACT_STATUS_LABELS[status]}".`);
+      markActivity();
       await loadAll({ silent: true });
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function editRemarks(id) {
-    const e = engineers.find((x) => String(x.id) === String(id));
-    if (!e) return;
-    const value = prompt(`Remarks for ${e.name} (${e.iek_number}):`, e.remarks || "");
-    if (value === null) return;
-
-    setBusy(true);
-    try {
-      await apiFetch(`/api/engineers/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ remarks: value.trim() }),
-      });
-      showToast("Remarks updated.");
-      await loadAll({ silent: true });
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function setContactStatus(id, contactStatus) {
-    const e = engineers.find((x) => String(x.id) === String(id));
-    if (!e) return;
-
-    setBusy(true);
-    try {
-      await apiFetch(`/api/engineers/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ contactStatus }),
-      });
-      showToast(`${e.name}: marked as "${CONTACT_STATUS_LABELS[contactStatus]}".`);
-      await loadAll({ silent: true });
+      await loadUrgentAndAnalytics();
     } catch (err) {
       showToast(err.message, true);
       await loadAll({ silent: true }); // re-sync the dropdown to the real server value
@@ -673,13 +1011,150 @@
     }
   }
 
+  async function quickNeverPickedUp(id) {
+    await quickSetContactStatus(id, "no_answer");
+  }
+
   async function resetAllVotes() {
-    if (!confirm("Reset ALL voting statuses to 'Not Voted'? This cannot be undone.")) return;
+    if (!confirm("Reset ALL voting statuses to 'Not Voted'? This cannot be undone. Only do this before the real voting window opens.")) return;
 
     setBusy(true);
     try {
       await apiFetch("/api/reset-votes", { method: "POST" });
       showToast("All voting statuses have been reset.");
+      markActivity();
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- Log Call modal ----------
+  function openCallModal(id) {
+    const e = engineers.find((x) => String(x.id) === String(id));
+    if (!e) return;
+    ensureIdentity();
+    callModalStatus = null;
+    el.callEngineerId.value = e.id;
+    el.callModalName.textContent = e.name;
+    el.callModalPhone.innerHTML = e.phone ? `<a href="tel:${escapeHtml(e.phone)}">${escapeHtml(e.phone)}</a>` : "No phone on file";
+    el.callNotes.value = "";
+    el.callForm.querySelectorAll(".call-status-btn").forEach((b) => b.classList.remove("selected"));
+    el.callSubmitBtn.disabled = true;
+    el.callModalOverlay.hidden = false;
+  }
+
+  function closeCallModal() {
+    el.callModalOverlay.hidden = true;
+  }
+
+  async function submitCallForm(evt) {
+    evt.preventDefault();
+    if (isBusy || !callModalStatus) return;
+    const id = el.callEngineerId.value;
+    const caller = ensureIdentity();
+    if (!caller) { showToast("Enter your name first.", true); return; }
+
+    setBusy(true);
+    try {
+      await apiFetch("/api/contact-calls", {
+        method: "POST",
+        body: JSON.stringify({
+          engineerId: Number(id),
+          callerName: caller,
+          callStatus: callModalStatus,
+          notes: el.callNotes.value.trim() || undefined,
+        }),
+      });
+      showToast("Call logged.");
+      markActivity();
+      closeCallModal();
+      await loadAll({ silent: true });
+      await loadUrgentAndAnalytics();
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- Engineer Details modal ----------
+  async function openDetailsModal(id) {
+    const e = engineers.find((x) => String(x.id) === String(id));
+    if (!e) return;
+
+    el.detailsModalName.textContent = `${e.name} (${e.iek_number})`;
+    el.detailsModalBody.innerHTML = "<p>Loading history…</p>";
+    el.detailsModalOverlay.hidden = false;
+
+    try {
+      const [callsData, remarksData] = await Promise.all([
+        apiFetch(`/api/contact-calls?engineerId=${e.id}`),
+        apiFetch(`/api/remarks?engineerId=${e.id}`),
+      ]);
+
+      const timeline = [
+        ...(e.voted_at ? [{ at: e.voted_at, action: "Voted", person: "System", notes: `✅ Voted at ${formatDateTime(e.voted_at)}` }] : []),
+        ...callsData.calls.map((c) => ({ at: c.called_at, action: "Called", person: c.caller_name, notes: `${CONTACT_STATUS_ICONS[c.call_status] || ""} ${CONTACT_STATUS_LABELS[c.call_status] || c.call_status}${c.notes ? " — " + c.notes : ""}` })),
+        ...remarksData.remarks.map((r) => ({ at: r.created_at, action: "Remark", person: r.author, notes: r.remark })),
+      ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+      const detailGrid = `
+        <div class="detail-grid">
+          <div class="detail-item"><div class="detail-item-label">Voted</div><div class="detail-item-value">${e.voted ? `Yes — ${formatDateTime(e.voted_at)}` : "No"}</div></div>
+          <div class="detail-item"><div class="detail-item-label">Call Status</div><div class="detail-item-value">${CONTACT_STATUS_ICONS[e.contact_status] || ""} ${CONTACT_STATUS_LABELS[e.contact_status] || e.contact_status}</div></div>
+          <div class="detail-item"><div class="detail-item-label">Calls Made</div><div class="detail-item-value">${e.call_count || 0}</div></div>
+          <div class="detail-item"><div class="detail-item-label">Last Contact</div><div class="detail-item-value">${e.last_contacted_at ? formatDateTime(e.last_contacted_at) : "Never"}</div></div>
+        </div>
+        ${e.remarks ? `<p><em>Legacy imported note: ${escapeHtml(e.remarks)}</em></p>` : ""}
+        <div class="form-actions" style="margin-bottom:14px;">
+          <button class="btn btn-primary btn-sm" id="detailsLogCallBtn" data-id="${e.id}">&#128222; Log Call</button>
+          <button class="btn btn-outline btn-sm" id="detailsAddRemarkBtn" data-id="${e.id}">&#128221; Add Remark</button>
+        </div>
+        <table class="history-table">
+          <thead><tr><th>Date/Time</th><th>Action</th><th>Person</th><th>Notes</th></tr></thead>
+          <tbody>
+            ${timeline.length === 0
+              ? `<tr><td colspan="4">No history yet.</td></tr>`
+              : timeline.map((t) => `<tr><td>${formatDateTime(t.at)}</td><td>${escapeHtml(t.action)}</td><td>${escapeHtml(t.person || "")}</td><td>${escapeHtml(t.notes || "")}</td></tr>`).join("")}
+          </tbody>
+        </table>
+      `;
+      el.detailsModalBody.innerHTML = detailGrid;
+
+      document.getElementById("detailsLogCallBtn").addEventListener("click", () => {
+        closeDetailsModal();
+        openCallModal(e.id);
+      });
+      document.getElementById("detailsAddRemarkBtn").addEventListener("click", () => addRemark(e.id));
+    } catch (err) {
+      el.detailsModalBody.innerHTML = `<p>Failed to load history: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  function closeDetailsModal() {
+    el.detailsModalOverlay.hidden = true;
+  }
+
+  async function addRemark(id) {
+    const e = engineers.find((x) => String(x.id) === String(id));
+    if (!e) return;
+    const author = ensureIdentity();
+    if (!author) { showToast("Enter your name first to add a remark.", true); return; }
+
+    const text = prompt(`Remark for ${e.name} (${e.iek_number}):`, "");
+    if (text === null || !text.trim()) return;
+
+    setBusy(true);
+    try {
+      await apiFetch("/api/remarks", {
+        method: "POST",
+        body: JSON.stringify({ engineerId: Number(id), author, remark: text.trim() }),
+      });
+      showToast(`Remark added: "📝 ${author} — ${text.trim()}"`);
+      markActivity();
       await loadAll({ silent: true });
     } catch (err) {
       showToast(err.message, true);
@@ -790,8 +1265,8 @@
   }
 
   // ---------- Export / Print ----------
-  function exportCSV() {
-    window.open("/api/export", "_blank");
+  function toggleExportDropdown() {
+    el.exportDropdown.hidden = !el.exportDropdown.hidden;
   }
 
   function printResults() {
@@ -861,10 +1336,26 @@
 
     el.importCsvBtn.addEventListener("click", () => el.importCsvInput.click());
     el.importCsvInput.addEventListener("change", handleImportFile);
-    el.exportCsvBtn.addEventListener("click", exportCSV);
+
+    el.exportCsvBtn.addEventListener("click", toggleExportDropdown);
+    el.exportDropdown.addEventListener("click", (evt) => {
+      const btn = evt.target.closest("button[data-type]");
+      if (!btn) return;
+      window.open(`/api/export?type=${btn.getAttribute("data-type")}`, "_blank");
+      el.exportDropdown.hidden = true;
+    });
+    document.addEventListener("click", (evt) => {
+      if (!el.exportDropdown.hidden && !el.exportDropdown.contains(evt.target) && evt.target !== el.exportCsvBtn) {
+        el.exportDropdown.hidden = true;
+      }
+    });
+
     el.printBtn.addEventListener("click", printResults);
     el.resetVotesBtn.addEventListener("click", resetAllVotes);
-    el.refreshBtn.addEventListener("click", () => loadAll());
+    el.refreshBtn.addEventListener("click", async () => {
+      await loadAll();
+      await loadUrgentAndAnalytics();
+    });
     el.retryConnectionBtn.addEventListener("click", () => loadAll());
 
     el.notificationBell.addEventListener("click", toggleNotificationDropdown);
@@ -874,6 +1365,18 @@
           evt.target !== el.notificationBell) {
         el.notificationDropdown.hidden = true;
       }
+    });
+
+    el.identityBadge.addEventListener("click", () => {
+      const current = getIdentity();
+      const name = prompt("Your name (shown on every call log / remark you add):", current);
+      if (name && name.trim()) setIdentity(name);
+    });
+
+    el.quickNavBtns.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.getElementById(btn.getAttribute("data-target"))?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     });
 
     el.auditLogBtn.addEventListener("click", toggleAuditPanel);
@@ -895,34 +1398,79 @@
       if (action === "candidate-delete") deleteCandidate(id);
     });
 
+    // Bulk selection
+    el.selectAllCheckbox.addEventListener("change", (evt) => selectAllVisible(evt.target.checked));
+    el.tableBody.addEventListener("change", (evt) => {
+      const checkbox = evt.target.closest(".row-checkbox");
+      if (checkbox) { toggleRowSelection(checkbox.getAttribute("data-id"), checkbox.checked); return; }
+
+      const select = evt.target.closest('select[data-action="contact-status"]');
+      if (select && !isBusy) quickSetContactStatus(select.getAttribute("data-id"), select.value);
+    });
+    el.bulkApplyBtn.addEventListener("click", bulkApplyStatus);
+    el.bulkExportBtn.addEventListener("click", bulkExportSelected);
+    el.bulkPrintBtn.addEventListener("click", bulkPrintCallList);
+    el.bulkClearBtn.addEventListener("click", () => { selectedIds.clear(); render(); });
+
     el.tableBody.addEventListener("click", (evt) => {
       const btn = evt.target.closest("button[data-action]");
       if (!btn || isBusy || btn.disabled) return;
       const id = btn.getAttribute("data-id");
       const action = btn.getAttribute("data-action");
       if (action === "vote") markVoted(id);
-      if (action === "undo") undoVote(id);
-      if (action === "remarks") editRemarks(id);
+      if (action === "call") openCallModal(id);
+      if (action === "never-picked-up") quickNeverPickedUp(id);
+      if (action === "details") openDetailsModal(id);
       if (action === "edit") openFormForEdit(id);
       if (action === "delete") deleteEngineer(id);
     });
 
-    el.tableBody.addEventListener("change", (evt) => {
-      const select = evt.target.closest('select[data-action="contact-status"]');
-      if (!select || isBusy) return;
-      setContactStatus(select.getAttribute("data-id"), select.value);
+    el.urgentTableBody.addEventListener("click", (evt) => {
+      const btn = evt.target.closest("button[data-action]");
+      if (!btn) return;
+      if (btn.getAttribute("data-action") === "call") openCallModal(btn.getAttribute("data-id"));
+    });
+
+    el.agendaTableBody.addEventListener("click", (evt) => {
+      const btn = evt.target.closest("button[data-action]");
+      if (!btn) return;
+      if (btn.getAttribute("data-action") === "call") openCallModal(btn.getAttribute("data-id"));
+    });
+
+    // Call modal
+    el.callForm.querySelectorAll(".call-status-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        el.callForm.querySelectorAll(".call-status-btn").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        callModalStatus = btn.getAttribute("data-status");
+        el.callSubmitBtn.disabled = false;
+      });
+    });
+    el.callForm.addEventListener("submit", submitCallForm);
+    el.callCancelBtn.addEventListener("click", closeCallModal);
+    el.callModalClose.addEventListener("click", closeCallModal);
+    el.callModalOverlay.addEventListener("click", (evt) => {
+      if (evt.target === el.callModalOverlay) closeCallModal();
+    });
+
+    // Details modal
+    el.detailsModalClose.addEventListener("click", closeDetailsModal);
+    el.detailsModalOverlay.addEventListener("click", (evt) => {
+      if (evt.target === el.detailsModalOverlay) closeDetailsModal();
     });
   }
 
   // ---------- Init ----------
   async function init() {
     bindEvents();
+    renderIdentityBadge();
     el.year.textContent = new Date().getFullYear();
     tickClock();
     setInterval(tickClock, 1000);
 
     await refreshElectionStatus();
     await loadAll({ silent: true });
+    await loadUrgentAndAnalytics();
 
     startPolling();
     startCountdownTicking();

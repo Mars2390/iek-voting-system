@@ -61,7 +61,11 @@ IEK-VOTING-FULL/
 │   ├── audit-log.js           # GET — recent audit trail (read-only)
 │   ├── candidates.js          # GET (list) / POST (add candidate)
 │   ├── candidate.js           # DELETE — /api/candidates/:id
-│   └── candidate-vote.js      # POST — /api/candidates/:id/vote (+1 tallied vote)
+│   ├── candidate-vote.js      # POST — /api/candidates/:id/vote (+1 tallied vote)
+│   ├── contact-calls.js       # GET (history) / POST (log a call) — the only place contact_status changes
+│   ├── remarks.js             # GET (history) / POST (add an authored remark)
+│   ├── urgent.js              # GET — live-computed follow-up flags
+│   └── analytics.js           # GET — status distribution, daily calls/confirmations, turnout
 ├── setup.js                  # One-command bootstrap: tables + seed + git push + deploy
 ├── fix-database.js           # Cleanup + clean re-import (see git history for context)
 ├── .env.example             # Template for required env vars (committed)
@@ -230,13 +234,13 @@ All endpoints return JSON (except `/api/export`, which returns a CSV file). All 
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/engineers` | List all engineers |
-| `POST` | `/api/engineers` | Create an engineer — body: `{ iekNumber, name, phone, remarks? }` |
-| `PUT` | `/api/engineers/:id` | Update an engineer — body: any of `{ name, phone, remarks, voted, contactStatus }` |
+| `GET` | `/api/engineers` | List all engineers, including call/contact fields and a live-computed `needs_followup` |
+| `POST` | `/api/engineers` | Create an engineer — body: `{ iekNumber, name, phone }` |
+| `PUT` | `/api/engineers/:id` | Update name/phone, or cast a vote — body: any of `{ name, phone, voted }`. `voted: false` is rejected with 403 once `voted` is already `true` (see [Votes cannot be undone](#votes-cannot-be-undone)). Contact status is **not** settable here — use `/api/contact-calls`. |
 | `DELETE` | `/api/engineers/:id` | Delete an engineer |
-| `GET` | `/api/stats` | `{ total, voted, notVoted, turnout }` |
+| `GET` | `/api/stats` | `{ total, voted, notVoted, turnout, needsFollowUp, notContacted }` |
 | `POST` | `/api/reset-votes` | Set every engineer's `voted` back to `false` (history is preserved) |
-| `GET` | `/api/export` | Download all engineers as CSV |
+| `GET` | `/api/export?type=X` | Download CSV — `type` is `engineers` (default), `stats`, `candidates`, `calls`, or `remarks` |
 | `POST` | `/api/seed` | Insert the 8 sample engineers (idempotent, optionally protected by `SEED_SECRET`) |
 | `POST` | `/api/import` | Bulk-add engineers from CSV text — body: `{ csv: "..." }` |
 | `GET` | `/api/election-status` | `{ phase, startsAt, endsAt, serverTime, testMode }` — `phase` is `before` \| `live` \| `closed` |
@@ -245,6 +249,12 @@ All endpoints return JSON (except `/api/export`, which returns a CSV file). All 
 | `POST` | `/api/candidates` | Add a candidate — body: `{ name, position, photoUrl? }` |
 | `POST` | `/api/candidates/:id/vote` | Record one counted ballot for a candidate (+1) |
 | `DELETE` | `/api/candidates/:id` | Remove a candidate (correction) |
+| `GET` | `/api/contact-calls?engineerId=X` | Call history for one engineer (all calls if `engineerId` omitted, capped at 500) |
+| `POST` | `/api/contact-calls` | Log a call — body: `{ engineerId, callerName, callStatus, notes? }`. This is the **only** way `contact_status` changes; it also increments `call_count` and stamps `last_contacted_at`. |
+| `GET` | `/api/remarks?engineerId=X` | Authored remark history for one engineer |
+| `POST` | `/api/remarks` | Add a remark — body: `{ engineerId, author, remark }` |
+| `GET` | `/api/urgent` | Engineers flagged for follow-up, computed live (not from a stale stored column) |
+| `GET` | `/api/analytics` | Status distribution, daily call activity, daily confirmations, turnout — powers the Analytics section |
 
 ### Candidates & Results — a separate concept from turnout
 
@@ -269,18 +279,34 @@ If it turns out you actually need each individual engineer's vote to be attribut
 
 `candidates.photo_url` is an optional field. Point it at any public image URL, or use a file already in this repo's `images/` folder (e.g. `/images/stariko-nyamori.jpg`, `/images/iek-logo.jpg` — both added from the WhatsApp images you shared, cropped to remove the WhatsApp UI chrome around the raw logo screenshot and to frame just the portrait from the campaign poster). A candidate without a photo falls back to an initials avatar, same as the engineers table.
 
-### Canvassing / call tracking (`contact_status`)
+### Canvassing / call tracking (full system)
 
-Separate from turnout and from candidate tallies: each engineer also has a `contact_status` — this is for your GOTV calling effort ("we call and inform them, mark who has answered, who needs follow-up"). Values:
+Separate from turnout and from candidate tallies: this is your GOTV calling operation — call people, log what happened, see who still needs a call, before Monday.
+
+**Contact status values** (set via the dropdown in the turnout table, the "📞 Call" button, or the Log Call modal — all three go through the same `POST /api/contact-calls` endpoint, so history is always complete regardless of which one you used):
 
 | Status | Meaning |
 |---|---|
-| `not_contacted` | Default — no call logged yet |
-| `confirmed` | Called, they confirmed they'll vote |
-| `follow_up` | Called, no answer / unclear — needs a follow-up call |
-| `declined` | Called, they said they won't vote |
+| `pending` 📝 | Default — no call logged yet |
+| `confirmed` ✅ | Called, they confirmed they'll vote |
+| `no_answer` 📞 | Called, no answer |
+| `busy_declined` 📱 | Called, was busy or declined |
+| `follow_up` 🔄 | Called, unclear — needs a follow-up call |
+| `not_reachable` ❌ | Number is wrong or off |
 
-Set it inline from the dropdown in the **Contact** column of the turnout table — it updates immediately (no separate save step) and stamps `last_contacted_at`. Filter the table by contact status using the dropdown next to the Voted/Not Voted buttons. The dashboard's **Needs Follow-up** card gives a live count of who still needs a call before Monday. This is independent of `voted` — someone can be `confirmed` and still show as `Not Voted` until they actually show up and are marked as voted.
+Every logged call writes a row to `contact_calls` (caller name, status, notes, timestamp) and bumps the engineer's `call_count` + `last_contacted_at`. **📞 Never Picked Up** is a one-click shortcut that logs `no_answer` with no modal. **👁 Details** opens a combined chronological history for that engineer — votes, calls, and remarks together, matching the Date/Time · Action · Person · Notes shape you asked for.
+
+**Remarks with author:** `POST /api/remarks` records `{ author, remark, created_at }` as its own row — not an overwritten single field. Every remark shows who wrote it and when, e.g. "📝 Eng. James Ochieng — Called at 10:30 AM — Confirmed will vote." The old single `engineers.remarks` text column still exists but is frozen — it holds whatever was imported before this table existed (migrated automatically as an author `"Legacy Import"` entry by `node setup.js`), and the app no longer writes to it.
+
+**Who is "the caller"?** There's no login system here (see [Security note](#security-note-please-read)) — the app asks once per browser for **your name** (top-right badge, click to change) and stores it in that browser's `localStorage`. It stamps every call/remark you make from that device. **This is self-reported, not verified** — anyone can type any name. It's good enough for a small trusted team coordinating a GOTV effort; it is not an accountability system that would hold up if someone wanted to misattribute their own actions.
+
+**🚨 Urgent (flagged for follow-up):** computed **live** on every request, not from a stored flag — one of the criteria ("no remark in 2 days") is time-based and would silently go stale if only checked when a row is written. Flagged when not yet voted, not confirmed, and any of: 3+ calls logged, current status is Follow-up/No Answer/Not Reachable, or no remark in the last 2 days.
+
+**📅 Today's Agenda:** the not-yet-confirmed, not-yet-voted engineers, sorted oldest-contact-first (never-contacted people appear at the top) — computed client-side from the same data already on the page, so it's always in sync with what you're looking at.
+
+**📊 Analytics:** call status distribution (pie), daily call volume and daily confirmations for the last 7 days (bar/line) — all hand-rolled inline SVG, deliberately **not** a third-party charting library. Two days before a real election is not when to introduce a new CDN dependency that could fail to load or break silently; plain SVG has zero external moving parts.
+
+**Bulk actions:** check rows in the turnout table (or "select all" in the header) to reveal a bulk bar — apply one status to everyone selected, export just that selection to CSV, or print a call list (opens a separate print-formatted window, doesn't disturb the main page).
 
 ### Bulk CSV import
 
@@ -298,7 +324,7 @@ IEK010,Eng. John Smith,0700000001,
 - Rows missing a required field are skipped and reported back in the toast/response, not silently dropped.
 - **Only `.csv` is supported**, not raw `.xlsx`. If your list is in Excel, use *File → Save As → CSV* first — adding real `.xlsx` binary parsing would mean a new dependency (e.g. `xlsx`/`exceljs`) that nothing else in this project needs; say so if you actually want that added.
 
-Setting `voted: true` via `PUT /api/engineers/:id` inserts a row into `votes` (with `voter_ip`) and logs `VOTE` to `audit_log`. Setting it back to `false` logs `UNDO_VOTE`. Any other field change logs `UPDATE`. Create/delete log `CREATE`/`DELETE`. Resetting logs a single `RESET_ALL`.
+Setting `voted: true` via `PUT /api/engineers/:id` inserts a row into `votes` (with `voter_ip`) and logs `VOTE` to `audit_log`. Any other field change logs `UPDATE`. Create/delete log `CREATE`/`DELETE`. Resetting logs a single `RESET_ALL`. (There is no more `UNDO_VOTE` — see below.)
 
 ---
 
@@ -307,13 +333,33 @@ Setting `voted: true` via `PUT /api/engineers/:id` inserts a row into `votes` (w
 The voting window is hardcoded in `api/_config.js`:
 
 ```js
-export const VOTING_START = new Date("2026-08-03T08:00:00+03:00"); // Mon Aug 3 2026, 8:00 AM EAT
+export const VOTING_START = new Date("2026-08-03T00:00:00+03:00"); // Mon Aug 3 2026, 12:00 AM (midnight) EAT
 export const VOTING_END   = new Date("2026-08-03T17:00:00+03:00"); // Mon Aug 3 2026, 5:00 PM EAT
 ```
 
 This is enforced **server-side**, not just in the UI — `PUT /api/engineers/:id` rejects any attempt to cast a *new* vote (`{ voted: true }` on someone who hasn't voted yet) with `403` outside this window, regardless of what the browser shows. The frontend countdown banner reflects the same window via `GET /api/election-status`, re-checked every 5 seconds so it self-corrects if a client's clock is off.
 
-Undoing a vote, editing details, adding/importing engineers, exporting, and viewing the audit log are **not** time-gated — those are setup/admin actions you'll need before and after the window, not "casting a ballot."
+Editing details, logging calls/remarks, adding/importing engineers, exporting, and viewing the audit log are **not** time-gated — those are setup/admin actions you'll need before and after the window, not "casting a ballot."
+
+### Votes cannot be undone
+
+Once `voted` is `true` for an engineer, `PUT /api/engineers/:id` with `{ voted: false }` is rejected with `403` — there is no "Undo" button in the UI anymore. This was a deliberate, explicit request ("election integrity"), and it's worth being clear about the actual tradeoff: **a misclick during real voting is now permanent through the app.** There is no in-app correction path.
+
+If a genuine mistake happens on election day (wrong row clicked), the only fix is a direct database correction — in the Neon Console SQL Editor:
+
+```sql
+-- Find the engineer and their vote row first to confirm you have the right one:
+SELECT e.id, e.iek_number, e.name, e.voted, v.id AS vote_id, v.voted_at
+FROM engineers e JOIN votes v ON v.engineer_id = e.id
+WHERE e.iek_number = 'IEK00X';
+
+-- Then, deliberately, as a rare emergency correction:
+DELETE FROM votes WHERE id = <vote_id_from_above>;
+UPDATE engineers SET voted = FALSE WHERE id = <engineer_id_from_above>;
+```
+This bypasses the app entirely on purpose — it's an emergency hatch, not a workflow, and won't appear in `audit_log` (since it never goes through the API). If you'd rather have a proper in-app correction path with its own audit trail (e.g. requiring a second confirmation, logged distinctly from a normal vote), that's a reasonable thing to add — just flagging that "cannot be unvoted" and "zero correction path" are two different asks, and only the first was requested here.
+
+`POST /api/reset-votes` (the **Reset All Votes** button) is unaffected by this — it's a deliberate bulk/admin action for clearing *test* votes before the real window opens, not a per-row undo. Don't use it after real voting has started.
 
 **To change the date/time:** edit the two constants in `api/_config.js` and redeploy.
 
@@ -335,17 +381,21 @@ Every open device polls `GET /api/engineers` + `GET /api/stats` every 5 seconds 
 
 ## How to Use the App
 
-1. **Dashboard** — Total Registered, Voted, Not Voted, Turnout % update from the database on every load and after every action.
-2. **Register an engineer** — **➕ Add Engineer** → fill IEK Number, Name, Phone, optional Remarks.
-3. **Search / filter** — search box filters by name/IEK number/phone; **All / Voted / Not Voted** buttons filter by status. Both operate on the last data fetched from the server.
-4. **Mark a vote** — **Mark Voted** → confirm. **Undo** reverts it.
-5. **Remarks** — click **Remarks** to attach/edit a note.
-6. **Edit / Remove** — update or delete an engineer's record.
-7. **Refresh** — re-fetches the latest data from the database (useful if someone else just voted from another device).
-8. **Import CSV** — bulk-add many engineers at once from a `.csv` file (see [Bulk CSV import](#bulk-csv-import) below).
-9. **Export CSV** — downloads the live register via `/api/export`.
-10. **Print** — clean, controls-free printout.
-11. **Reset All Votes** — clears the live "voted" flag for everyone; historical `votes`/`audit_log` rows are kept.
+1. **Set your name** — click the badge top-right, once per browser. Stamps every call/remark you log (self-reported, not verified — see [call tracking](#canvassing--call-tracking-full-system)).
+2. **Dashboard** — Total Registered, Voted, Not Voted, Turnout %, Needs Follow-up update from the database on every load and after every action.
+3. **Register an engineer** — **➕ Add Engineer** → fill IEK Number, Name, Phone.
+4. **Search / filter** — search box filters by name/IEK number/phone; **All / Voted / Not Voted** buttons and the contact-status dropdown filter the table. Both operate on the last data fetched from the server.
+5. **Mark a vote** — **VOTE** → confirm. **This cannot be undone** through the app (see [Votes cannot be undone](#votes-cannot-be-undone)).
+6. **Log a call** — **📞 Call** opens the Log Call modal (pick a status, optional notes); **📞 Never Picked Up** is a one-click shortcut; the inline dropdown in the Contact column does the same thing without notes.
+7. **View full history** — **👁 Details** shows a combined timeline of votes/calls/remarks for that engineer, plus quick Log Call / Add Remark buttons.
+8. **Edit / Remove** — update an engineer's name/phone, or delete their record.
+9. **Bulk actions** — check rows (or "select all"), then apply a status to everyone selected, export just that selection, or print a call list.
+10. **🚨 Urgent / 📅 Today's Agenda / 📊 Analytics** — jump to these via the nav pills under the header.
+11. **Refresh** — re-fetches the latest data from the database (useful if someone else just acted from another device).
+12. **Import CSV** — bulk-add many engineers at once from a `.csv` file (see [Bulk CSV import](#bulk-csv-import) below).
+13. **Export CSV** — pick a report type (voter list, stats, candidates, call history, remarks) from the Export CSV dropdown.
+14. **Print** — clean, controls-free printout of the main page.
+15. **Reset All Votes** — clears the live "voted" flag for everyone; historical `votes`/`audit_log` rows are kept. Only use this before the real window opens (see the tradeoff note above).
 
 If the API can't reach the database, a red banner appears at the top with a **Retry** button instead of the page silently showing stale or empty data.
 
@@ -353,7 +403,7 @@ If the API can't reach the database, a red banner appears at the top with a **Re
 
 ## Security note (please read)
 
-This build intentionally does **not** include authentication — it wasn't part of the request, and bolting one on unasked would have meant inventing a login flow, session storage, and UI for it. But said plainly: **as shipped, `POST /api/engineers`, `PUT /api/engineers/:id`, `DELETE /api/engineers/:id`, `POST /api/reset-votes`, and `POST /api/import` are open to anyone who can reach your deployment URL**, via `curl` or otherwise — not just through the app's buttons. For a real election with real voters, you should add one of:
+This build intentionally does **not** include authentication — it wasn't part of the request, and bolting one on unasked would have meant inventing a login flow, session storage, and UI for it. But said plainly: **as shipped, every mutating endpoint** (`POST`/`PUT`/`DELETE` on engineers, candidates, contact-calls, remarks, reset-votes, import) **is open to anyone who can reach your deployment URL**, via `curl` or otherwise — not just through the app's buttons. For a real election with real voters, you should add one of:
 
 - Basic auth or an admin token check in front of the mutating endpoints (quick, but limited).
 - A real auth provider (see Vercel's Marketplace auth integrations — Clerk, Auth0, etc.) gating who can reach the admin UI at all.
@@ -361,7 +411,11 @@ This build intentionally does **not** include authentication — it wasn't part 
 
 Ask if you want this wired in — it's a meaningfully different scope than what was built here (frontend + database + CRUD API), so it wasn't added silently.
 
-Two more specifics for election day: `GET /api/audit-log` is read-only but exposes voter IP addresses to anyone who can reach it — acceptable for an internal committee tool, worth knowing if the link is ever shared outside the committee. And the voting-window lock (`403` outside 8 AM–5 PM Monday) blocks *casting a new vote* server-side, but does **not** stop someone from adding/editing/deleting engineer records at any time — that was intentional (you need to keep registering people right up to Monday) but means the same lack of authentication applies to those endpoints around the clock, not just during the vote window.
+A few more specifics for election day:
+- `GET /api/audit-log` is read-only but exposes voter IP addresses to anyone who can reach it — acceptable for an internal committee tool, worth knowing if the link is ever shared outside the committee.
+- The voting-window lock (`403` outside the Monday window) blocks *casting a new vote* server-side, but does **not** stop someone from adding/editing/deleting engineer records, or logging calls/remarks, at any time — intentional (you need to keep working right up to Monday), but means the same lack of authentication applies to those endpoints around the clock.
+- **The "caller name" on calls and remarks is self-typed, not authenticated.** Anyone with the link can log a call as anyone else's name. Fine for a small trusted team; not an accountability system that would survive someone deliberately misattributing their actions.
+- **Votes cannot be reversed through the app once cast** (see [above](#votes-cannot-be-undone)) — combined with no authentication, this means a wrong click during real voting has no in-app recourse at all, only a manual database correction. Weigh whether that tradeoff is acceptable for your event, given there's no login to prevent the wrong click from a stranger in the first place.
 
 ---
 
@@ -374,22 +428,25 @@ Two more specifics for election day: `GET /api/audit-log` is read-only but expos
 ## Election Day Checklist
 
 **Before Monday:**
+- [ ] Run `node setup.js` (or `node fix-database.js`) at least once after this upgrade — it migrates existing live data: remaps old `contact_status` values to the new vocabulary, adds the new columns/tables, and backfills legacy remarks. Safe to re-run.
 - [ ] Confirm `ALLOW_TEST_VOTES` is **not** set to `true` in Vercel (Settings → Environment Variables). If you added it to test, remove it or set it to `false`, then redeploy.
 - [ ] Register every eligible engineer (via the form, **Import CSV**, or `POST /api/import`).
 - [ ] Add every candidate (e.g. Eng. Stariko Nyamori — Honorary Treasurer) via **+ Add Candidate** in the Candidates & Results section.
-- [ ] Double-check `api/_config.js` has the correct start/end date/time if it ever needs to change.
-- [ ] Run **Reset All Votes** once, right before the real window opens, if anyone cast test votes while `ALLOW_TEST_VOTES` was on — otherwise their test vote will still show as "Voted" on the real day.
+- [ ] Double-check `api/_config.js` has the correct start/end date/time if it ever needs to change — it now unlocks at **midnight** Monday, not 8 AM.
+- [ ] Run **Reset All Votes** once, right before the real window opens, if anyone cast test votes while `ALLOW_TEST_VOTES` was on — otherwise their test vote will still show as "Voted" on the real day, and **it can no longer be undone per-row** once real voting starts.
+- [ ] Set your name via the identity badge before logging any calls, so history is attributed correctly.
+- [ ] Start working through **📅 Today's Agenda** / **🚨 Urgent** to reach everyone before Monday.
 - [ ] Share the live link: `https://iek-voting-system.vercel.app` (or check your Vercel dashboard for your actual assigned domain if this one isn't it).
-- [ ] Read the [Security note](#security-note-please-read) below — there is currently no login, so anyone with the link can vote, add, or edit. Fine for a supervised in-person check-in desk; not fine if the link goes somewhere uncontrolled.
+- [ ] Read the [Security note](#security-note-please-read) — there is currently no login, so anyone with the link can vote, add, or edit, and votes can't be corrected in-app once cast. Fine for a supervised in-person check-in desk; not fine if the link goes somewhere uncontrolled.
 
 **On election day:**
-- [ ] The countdown banner flips to "🟢 VOTING IS LIVE!" automatically at 8:00 AM — no action needed.
+- [ ] The countdown banner flips to "🟢 VOTING IS LIVE!" automatically at **midnight** — no action needed.
 - [ ] Vote buttons enable automatically at the same moment across every open device/tab.
 - [ ] Use **View Audit Log** any time to see a live who/what/when trail of every action.
 - [ ] At 5:00 PM the banner flips to "🔴 VOTING CLOSED" and vote buttons disable automatically — again, no action needed.
 
 **After voting closes:**
-- [ ] **Export CSV** for the official record.
+- [ ] **Export CSV** — pull the Full Voter List, Turnout Statistics, Candidate Results, and Call History reports for the official record.
 - [ ] **View Audit Log** to review the full trail if anything needs reconciling.
 - [ ] Consider taking the deployment offline or restricting write access afterward, since the API has no login and will otherwise stay open indefinitely.
 

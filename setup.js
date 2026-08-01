@@ -173,11 +173,87 @@ async function main() {
   // Sync columns added after the tables already existed on a live database.
   // ADD COLUMN IF NOT EXISTS is a no-op (and touches no existing rows) when
   // the column is already there.
-  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS contact_status VARCHAR(20) DEFAULT 'not_contacted'`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS contact_status VARCHAR(20) DEFAULT 'pending'`;
   await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS last_contacted_at TIMESTAMP`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS call_count INTEGER DEFAULT 0`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS confirmed_vote BOOLEAN DEFAULT FALSE`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS needs_followup BOOLEAN DEFAULT FALSE`;
   await sql`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS photo_url TEXT`;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS contact_calls (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+      caller_name VARCHAR(100),
+      call_status VARCHAR(50),
+      notes TEXT,
+      called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS remarks (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+      author VARCHAR(100),
+      remark TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_contact_calls_engineer_id ON contact_calls(engineer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_contact_calls_called_at ON contact_calls(called_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_remarks_engineer_id ON remarks(engineer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_remarks_created_at ON remarks(created_at)`;
+
   ok("Tables created/synced! (existing engineers/votes/audit_log/candidates data is untouched)");
+
+  step("Migrating contact_status values to the new vocabulary");
+  // Earlier version of this app used: not_contacted, confirmed, follow_up, declined.
+  // New vocabulary: pending, confirmed, no_answer, busy_declined, follow_up, not_reachable.
+  // 'confirmed' and 'follow_up' are unchanged; remap the rest. Safe to re-run —
+  // once migrated, these WHERE clauses match zero rows.
+  const remapped1 = await sql`UPDATE engineers SET contact_status = 'pending' WHERE contact_status = 'not_contacted' RETURNING id`;
+  const remapped2 = await sql`UPDATE engineers SET contact_status = 'busy_declined' WHERE contact_status = 'declined' RETURNING id`;
+  const remapped3 = await sql`UPDATE engineers SET contact_status = 'pending' WHERE contact_status IS NULL RETURNING id`;
+  const remappedTotal = remapped1.length + remapped2.length + remapped3.length;
+  if (remappedTotal > 0) {
+    ok(`Remapped ${remappedTotal} row(s) to the new contact_status vocabulary.`);
+  } else {
+    ok("No old-vocabulary contact_status values found (already migrated, or fresh database).");
+  }
+
+  step("Backfilling legacy remarks into the remarks table");
+  // Only inserts a 'Legacy Import' row for engineers that don't already have
+  // one — safe to re-run without creating duplicates on repeat setup.js runs.
+  const backfilled = await sql`
+    INSERT INTO remarks (engineer_id, author, remark)
+    SELECT e.id, 'Legacy Import', e.remarks
+    FROM engineers e
+    WHERE e.remarks IS NOT NULL AND e.remarks <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM remarks r WHERE r.engineer_id = e.id AND r.author = 'Legacy Import'
+      )
+    RETURNING id
+  `;
+  ok(`${backfilled.length} legacy remark(s) migrated into the remarks table (existing entries untouched).`);
+
+  step("Syncing confirmed_vote / needs_followup");
+  await sql`UPDATE engineers SET confirmed_vote = (contact_status = 'confirmed')`;
+  // needs_followup is refreshed live by the API on every read (see api/urgent.js
+  // and api/engineers.js) since one of its conditions is time-based ("no remark
+  // in 2 days") and would silently go stale if only computed here. This is just
+  // a one-time backfill so the stored column isn't misleadingly blank.
+  await sql`
+    UPDATE engineers e SET needs_followup = (
+      NOT e.voted AND e.contact_status <> 'confirmed' AND (
+        e.call_count >= 3
+        OR e.contact_status IN ('follow_up', 'no_answer', 'not_reachable')
+        OR NOT EXISTS (
+          SELECT 1 FROM remarks r WHERE r.engineer_id = e.id AND r.created_at > NOW() - INTERVAL '2 days'
+        )
+      )
+    )
+  `;
+  ok("confirmed_vote and needs_followup synced.");
 
   step("Seeding sample engineers");
   const SAMPLE_ENGINEERS = [

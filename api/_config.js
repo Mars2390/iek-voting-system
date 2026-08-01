@@ -1,7 +1,7 @@
 // Shared election-window configuration.
 // Filename is prefixed with "_" so Vercel excludes it from routing.
 
-export const VOTING_START = new Date("2026-08-03T08:00:00+03:00"); // Mon Aug 3 2026, 8:00 AM EAT
+export const VOTING_START = new Date("2026-08-03T00:00:00+03:00"); // Mon Aug 3 2026, 12:00 AM (midnight) EAT
 export const VOTING_END = new Date("2026-08-03T17:00:00+03:00");   // Mon Aug 3 2026, 5:00 PM EAT
 
 // Temporary escape hatch so the voting flow can be tested end-to-end

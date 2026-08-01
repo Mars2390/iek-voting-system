@@ -29,6 +29,9 @@
       </div>
     </div>
     <div class="header-actions">
+      <button class="identity-badge" id="identityBadge" type="button" title="Click to change your name">
+        &#128100; <span id="identityName">Set your name</span>
+      </button>
       <span class="live-badge" id="pollingBadge"><span class="dot"></span> Live</span>
       <div class="bell-wrap">
         <button class="bell-btn" id="notificationBell" type="button" aria-label="Notifications">
@@ -46,6 +49,15 @@
       <span id="clock" class="clock"></span>
     </div>
   </div>
+  <nav class="quick-nav container" aria-label="Section navigation">
+    <button class="quick-nav-btn" data-target="analyticsSection" type="button">&#128202; Analytics</button>
+    <button class="quick-nav-btn" data-target="urgentSection" type="button">
+      &#128680; Urgent <span id="urgentNavBadge" class="quick-nav-badge" hidden>0</span>
+    </button>
+    <button class="quick-nav-btn" data-target="agendaSection" type="button">&#128197; Today's Agenda</button>
+    <button class="quick-nav-btn" data-target="candidatesSection" type="button">&#128499;&#65039; Candidates</button>
+    <button class="quick-nav-btn" data-target="turnoutSection" type="button">&#128203; Turnout Table</button>
+  </nav>
 </header>
 
 <main class="container">
@@ -102,6 +114,94 @@
     </div>
   </div>
 
+  <!-- Analytics -->
+  <section class="panel" id="analyticsSection">
+    <div class="table-panel-header">
+      <h2>&#128202; Analytics</h2>
+      <span class="last-activity" id="lastActivity">Last activity: &mdash;</span>
+    </div>
+
+    <div class="analytics-stat-grid">
+      <div class="mini-stat"><span class="mini-stat-value" id="anaTotal">0</span><span class="mini-stat-label">Total Engineers</span></div>
+      <div class="mini-stat mini-confirmed"><span class="mini-stat-value" id="anaConfirmed">0</span><span class="mini-stat-label">&#9989; Confirmed to Vote</span></div>
+      <div class="mini-stat mini-no-answer"><span class="mini-stat-value" id="anaNoAnswer">0</span><span class="mini-stat-label">&#128222; No Answer</span></div>
+      <div class="mini-stat mini-follow-up"><span class="mini-stat-value" id="anaFollowUp">0</span><span class="mini-stat-label">&#128260; Follow-up Needed</span></div>
+      <div class="mini-stat mini-not-reachable"><span class="mini-stat-value" id="anaNotReachable">0</span><span class="mini-stat-label">&#10060; Not Reachable</span></div>
+      <div class="mini-stat mini-pending"><span class="mini-stat-value" id="anaPending">0</span><span class="mini-stat-label">&#128221; Pending</span></div>
+      <div class="mini-stat"><span class="mini-stat-value" id="anaTurnout">0%</span><span class="mini-stat-label">Voter Turnout</span></div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h3>Call Status Distribution</h3>
+        <div id="pieChart" class="chart-svg-wrap"></div>
+        <div id="pieChartLegend" class="chart-legend"></div>
+      </div>
+      <div class="chart-card">
+        <h3>Daily Call Activity (7 days)</h3>
+        <div id="barChart" class="chart-svg-wrap"></div>
+      </div>
+      <div class="chart-card">
+        <h3>Voter Confirmations Over Time (7 days)</h3>
+        <div id="lineChart" class="chart-svg-wrap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Urgent / non-responders -->
+  <section class="panel" id="urgentSection">
+    <div class="table-panel-header">
+      <h2>&#128680; Urgent &mdash; Need to Call</h2>
+      <span id="urgentCount" class="results-count">0 flagged</span>
+    </div>
+    <p class="candidates-caption">
+      Auto-flagged: 3+ calls with no confirmation, status is Follow-up/No Answer/Not Reachable, or no remark logged in the last 2 days. Cleared automatically once confirmed or voted.
+    </p>
+    <div class="table-scroll">
+      <table id="urgentTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Calls</th>
+            <th>Last Contact</th>
+            <th>Reason</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="urgentTableBody"></tbody>
+      </table>
+    </div>
+    <div id="urgentEmpty" class="empty-state" hidden><p>&#127881; Nobody is flagged right now.</p></div>
+  </section>
+
+  <!-- Today's Agenda -->
+  <section class="panel" id="agendaSection">
+    <div class="table-panel-header">
+      <h2>&#128197; Today's Call Agenda</h2>
+      <span id="agendaCount" class="results-count">0 to call</span>
+    </div>
+    <p class="candidates-caption">
+      Priority call list: not yet confirmed, ordered by longest since last contact first.
+    </p>
+    <div class="table-scroll">
+      <table id="agendaTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Last Contact</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="agendaTableBody"></tbody>
+      </table>
+    </div>
+    <div id="agendaEmpty" class="empty-state" hidden><p>&#9989; Everyone has been reached.</p></div>
+  </section>
+
   <!-- Connection error banner -->
   <div id="connectionBanner" class="connection-banner" role="alert" hidden>
     <span class="connection-banner-icon">&#9888;&#65039;</span>
@@ -128,10 +228,12 @@
 
       <select id="contactFilter" class="filter-select" aria-label="Filter by contact status">
         <option value="">Any contact status</option>
-        <option value="not_contacted">Not Contacted</option>
-        <option value="confirmed">Confirmed will vote</option>
-        <option value="follow_up">Needs Follow-up</option>
-        <option value="declined">Declined</option>
+        <option value="pending">Pending</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="no_answer">No Answer</option>
+        <option value="busy_declined">Busy/Declined</option>
+        <option value="follow_up">Follow-up Needed</option>
+        <option value="not_reachable">Not Reachable</option>
       </select>
     </div>
 
@@ -146,9 +248,18 @@
         <span>&#11014;&#65039;</span> Import CSV
       </button>
       <input type="file" id="importCsvInput" accept=".csv,text/csv" hidden>
-      <button class="btn btn-secondary" id="exportCsvBtn" type="button">
-        <span>&#11015;&#65039;</span> Export CSV
-      </button>
+      <div class="export-dropdown-wrap">
+        <button class="btn btn-secondary" id="exportCsvBtn" type="button">
+          <span>&#11015;&#65039;</span> Export CSV
+        </button>
+        <div class="export-dropdown" id="exportDropdown" hidden>
+          <button data-type="engineers" type="button">Full Voter List</button>
+          <button data-type="stats" type="button">Turnout Statistics</button>
+          <button data-type="candidates" type="button">Candidate Results</button>
+          <button data-type="calls" type="button">Call History</button>
+          <button data-type="remarks" type="button">Remarks History</button>
+        </div>
+      </div>
       <button class="btn btn-secondary" id="printBtn" type="button">
         <span>&#128424;&#65039;</span> Print
       </button>
@@ -160,6 +271,23 @@
       </button>
     </div>
     <div class="last-updated" id="lastUpdated"></div>
+  </section>
+
+  <!-- Bulk action bar -->
+  <section class="panel bulk-bar" id="bulkBar" hidden>
+    <span id="bulkCount" class="results-count">0 selected</span>
+    <select id="bulkStatusSelect" class="filter-select">
+      <option value="confirmed">Mark as: Called &amp; Confirmed</option>
+      <option value="no_answer">Mark as: Called - No Answer</option>
+      <option value="busy_declined">Mark as: Called - Busy/Declined</option>
+      <option value="follow_up">Mark as: Follow-up Needed</option>
+      <option value="not_reachable">Mark as: Not Reachable</option>
+      <option value="pending">Mark as: Pending</option>
+    </select>
+    <button class="btn btn-primary btn-sm" id="bulkApplyBtn" type="button">Apply to Selected</button>
+    <button class="btn btn-secondary btn-sm" id="bulkExportBtn" type="button">Export Selected</button>
+    <button class="btn btn-secondary btn-sm" id="bulkPrintBtn" type="button">Print Call List</button>
+    <button class="btn btn-outline btn-sm" id="bulkClearBtn" type="button">Clear Selection</button>
   </section>
 
   <!-- Audit log panel -->
@@ -184,7 +312,7 @@
   </section>
 
   <!-- Candidates & Results -->
-  <section class="panel candidates-panel">
+  <section class="panel candidates-panel" id="candidatesSection">
     <div class="table-panel-header">
       <h2>Candidates &amp; Results</h2>
       <button class="btn btn-primary btn-sm" id="toggleCandidateFormBtn" type="button">+ Add Candidate</button>
@@ -240,10 +368,6 @@
           <label for="phone">Phone Number</label>
           <input type="tel" id="phone" placeholder="e.g. 0712345678 (optional)">
         </div>
-        <div class="form-field">
-          <label for="remarks">Remarks</label>
-          <input type="text" id="remarks" placeholder="Optional notes">
-        </div>
       </div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" id="formSubmitBtn">Register Engineer</button>
@@ -253,7 +377,7 @@
   </section>
 
   <!-- Engineers Table -->
-  <section class="panel table-panel">
+  <section class="panel table-panel" id="turnoutSection">
     <div class="table-panel-header">
       <h2>Registered Engineers &mdash; Turnout</h2>
       <span id="resultsCount" class="results-count">0 engineers</span>
@@ -262,13 +386,13 @@
       <table id="engineersTable">
         <thead>
           <tr>
+            <th><input type="checkbox" id="selectAllCheckbox" aria-label="Select all"></th>
             <th>IEK Number</th>
             <th>Name</th>
             <th>Phone</th>
             <th>Status</th>
             <th>Voted At</th>
             <th>Contact</th>
-            <th>Remarks</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -282,6 +406,47 @@
   </section>
 
 </main>
+
+<!-- Log Call modal -->
+<div class="modal-overlay" id="callModalOverlay" hidden>
+  <div class="modal" role="dialog" aria-label="Log a call">
+    <div class="modal-header">
+      <h3>&#128222; Log Call &mdash; <span id="callModalName"></span></h3>
+      <button class="modal-close" id="callModalClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-phone" id="callModalPhone"></div>
+    <form id="callForm">
+      <input type="hidden" id="callEngineerId">
+      <div class="call-status-grid">
+        <button type="button" class="call-status-btn confirmed" data-status="confirmed">&#9989; Called &amp; Confirmed</button>
+        <button type="button" class="call-status-btn no_answer" data-status="no_answer">&#128222; No Answer</button>
+        <button type="button" class="call-status-btn busy_declined" data-status="busy_declined">&#128241; Busy/Declined</button>
+        <button type="button" class="call-status-btn follow_up" data-status="follow_up">&#128260; Follow-up Needed</button>
+        <button type="button" class="call-status-btn not_reachable" data-status="not_reachable">&#10060; Not Reachable</button>
+        <button type="button" class="call-status-btn pending" data-status="pending">&#128221; Pending</button>
+      </div>
+      <div class="form-field">
+        <label for="callNotes">Notes (optional)</label>
+        <input type="text" id="callNotes" placeholder="e.g. Will vote in the morning">
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="callSubmitBtn" disabled>Log Call</button>
+        <button type="button" class="btn btn-outline" id="callCancelBtn">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Engineer Details modal -->
+<div class="modal-overlay" id="detailsModalOverlay" hidden>
+  <div class="modal modal-wide" role="dialog" aria-label="Engineer details">
+    <div class="modal-header">
+      <h3 id="detailsModalName">Engineer Details</h3>
+      <button class="modal-close" id="detailsModalClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div id="detailsModalBody"></div>
+  </div>
+</div>
 
 <footer class="site-footer">
   <div class="container footer-inner">

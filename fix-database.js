@@ -148,10 +148,50 @@ async function main() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_candidates_position ON candidates(position)`;
-  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS contact_status VARCHAR(20) DEFAULT 'not_contacted'`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS contact_status VARCHAR(20) DEFAULT 'pending'`;
   await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS last_contacted_at TIMESTAMP`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS call_count INTEGER DEFAULT 0`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS confirmed_vote BOOLEAN DEFAULT FALSE`;
+  await sql`ALTER TABLE engineers ADD COLUMN IF NOT EXISTS needs_followup BOOLEAN DEFAULT FALSE`;
   await sql`ALTER TABLE candidates ADD COLUMN IF NOT EXISTS photo_url TEXT`;
-  ok("candidates table ready, columns synced (existing data untouched).");
+  await sql`
+    CREATE TABLE IF NOT EXISTS contact_calls (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+      caller_name VARCHAR(100),
+      call_status VARCHAR(50),
+      notes TEXT,
+      called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS remarks (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+      author VARCHAR(100),
+      remark TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_contact_calls_engineer_id ON contact_calls(engineer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_remarks_engineer_id ON remarks(engineer_id)`;
+
+  await sql`UPDATE engineers SET contact_status = 'pending' WHERE contact_status = 'not_contacted'`;
+  await sql`UPDATE engineers SET contact_status = 'busy_declined' WHERE contact_status = 'declined'`;
+  await sql`UPDATE engineers SET contact_status = 'pending' WHERE contact_status IS NULL`;
+
+  const backfilled = await sql`
+    INSERT INTO remarks (engineer_id, author, remark)
+    SELECT e.id, 'Legacy Import', e.remarks
+    FROM engineers e
+    WHERE e.remarks IS NOT NULL AND e.remarks <> ''
+      AND NOT EXISTS (SELECT 1 FROM remarks r WHERE r.engineer_id = e.id AND r.author = 'Legacy Import')
+    RETURNING id
+  `;
+
+  await sql`UPDATE engineers SET confirmed_vote = (contact_status = 'confirmed')`;
+
+  ok(`candidates table ready, columns synced, ${backfilled.length} legacy remark(s) backfilled (existing data untouched).`);
 
   // ---- 3. Import the clean CSV ----
   const csvPath = path.join(__dirname, "data", "iek-voter-register-import.csv");
