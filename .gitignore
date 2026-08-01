@@ -23,5 +23,10 @@ desktop.ini
 *.log
 npm-debug.log*
 
+
+# Real voter/member data exports (names, phones, membership numbers) —
+# never committed to source control.
+/data/
+
 # Misc
 *.tmp
