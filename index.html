@@ -250,14 +250,19 @@
       <input type="file" id="importCsvInput" accept=".csv,text/csv" hidden>
       <div class="export-dropdown-wrap">
         <button class="btn btn-secondary" id="exportCsvBtn" type="button">
-          <span>&#11015;&#65039;</span> Export CSV
+          <span>&#11015;&#65039;</span> Export
         </button>
         <div class="export-dropdown" id="exportDropdown" hidden>
+          <div class="export-format-toggle" role="group" aria-label="Export file format">
+            <button class="export-format-btn active" data-format="csv" type="button">CSV</button>
+            <button class="export-format-btn" data-format="excel" type="button">Excel</button>
+          </div>
           <button data-type="engineers" type="button">Full Voter List</button>
           <button data-type="stats" type="button">Turnout Statistics</button>
           <button data-type="candidates" type="button">Candidate Results</button>
           <button data-type="calls" type="button">Call History</button>
           <button data-type="remarks" type="button">Remarks History</button>
+          <button id="fullReportPdfBtn" type="button">&#128196; Full Report (Print / Save as PDF)</button>
         </div>
       </div>
       <button class="btn btn-secondary" id="printBtn" type="button">

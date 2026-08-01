@@ -235,7 +235,7 @@ Vercel auto-detects the `/api` folder as Functions; no build step is required fo
 
 ## API Reference
 
-All endpoints return JSON (except `/api/export`, which returns a CSV file). All mutating endpoints accept/return `Content-Type: application/json`.
+All endpoints return JSON (except `/api/export`, which returns a CSV or Excel file). All mutating endpoints accept/return `Content-Type: application/json`.
 
 | Method | Path | Description |
 |---|---|---|
@@ -245,7 +245,7 @@ All endpoints return JSON (except `/api/export`, which returns a CSV file). All 
 | `DELETE` | `/api/engineers/:id` | Delete an engineer |
 | `GET` | `/api/stats` | `{ total, voted, notVoted, turnout, needsFollowUp, notContacted }` |
 | `POST` | `/api/reset-votes` | Set every engineer's `voted` back to `false` (history is preserved) |
-| `GET` | `/api/export?type=X` | Download CSV — `type` is `engineers` (default), `stats`, `candidates`, `calls`, or `remarks` |
+| `GET` | `/api/export?type=X&format=Y` | Download a report — `type` is `engineers` (default), `stats`, `candidates`, `calls`, or `remarks`; `format` is `csv` (default) or `excel` |
 | `POST` | `/api/seed` | Insert the 8 sample engineers (idempotent, optionally protected by `SEED_SECRET`) |
 | `POST` | `/api/import` | Bulk-add engineers from CSV text — body: `{ csv: "..." }` |
 | `GET` | `/api/election-status` | `{ phase, startsAt, endsAt, serverTime, testMode }` — `phase` is `before` \| `live` \| `closed` |
@@ -301,7 +301,7 @@ Separate from turnout and from candidate tallies: this is your GOTV calling oper
 
 Every logged call writes a row to `contact_calls` (caller name, status, notes, timestamp) and bumps the engineer's `call_count` + `last_contacted_at`. **📞 Never Picked Up** is a one-click shortcut that logs `no_answer` with no modal. **👁 Details** opens a combined chronological history for that engineer — votes, calls, and remarks together, matching the Date/Time · Action · Person · Notes shape you asked for.
 
-**Remarks with author:** `POST /api/remarks` records `{ author, remark, created_at }` as its own row — not an overwritten single field. Every remark shows who wrote it and when, e.g. "📝 Eng. James Ochieng — Called at 10:30 AM — Confirmed will vote." The old single `engineers.remarks` text column still exists but is frozen — it holds whatever was imported before this table existed (migrated automatically as an author `"Legacy Import"` entry by `node setup.js`), and the app no longer writes to it.
+**Remarks with author:** `POST /api/remarks` records `{ author, remark, created_at }` as its own row — not an overwritten single field. Every remark shows who wrote it and when, e.g. "📝 Eng. James Ochieng — Called at 10:30 AM — Confirmed will vote." The old single `engineers.remarks` text column still exists (kept for backward-compat display as "Legacy imported note" in the Details modal), but the app writes new entries into the `remarks` table now, not that column — including **Import CSV**: any `remarks` text in an imported row gets an author `"CSV Import"` entry in `remarks` too (not just the legacy column), so it correctly counts toward the "no remark in 2 days" follow-up check instead of silently making a freshly-imported person look un-contacted.
 
 **Who is "the caller"?** There's no login system here (see [Security note](#security-note-please-read)) — the app asks once per browser for **your name** (top-right badge, click to change) and stores it in that browser's `localStorage`. It stamps every call/remark you make from that device. **This is self-reported, not verified** — anyone can type any name. It's good enough for a small trusted team coordinating a GOTV effort; it is not an accountability system that would hold up if someone wanted to misattribute their own actions.
 
@@ -312,6 +312,10 @@ Every logged call writes a row to `contact_calls` (caller name, status, notes, t
 **📊 Analytics:** call status distribution (pie), daily call volume and daily confirmations for the last 7 days (bar/line) — all hand-rolled inline SVG, deliberately **not** a third-party charting library. Two days before a real election is not when to introduce a new CDN dependency that could fail to load or break silently; plain SVG has zero external moving parts.
 
 **Bulk actions:** check rows in the turnout table (or "select all" in the header) to reveal a bulk bar — apply one status to everyone selected, export just that selection to CSV, or print a call list (opens a separate print-formatted window, doesn't disturb the main page).
+
+**Export formats:** the **Export** dropdown has a CSV/Excel toggle at the top — pick one, then choose a report (voter list, stats, candidates, call history, remarks). Excel isn't a real `.xlsx` (that's a zip container and genuinely needs a library to build correctly); it's a hand-rolled "Excel 2003 XML Spreadsheet" file, which Excel/LibreOffice/Google Sheets have all opened natively for 20+ years. Adding `xlsx`/`exceljs` as a dependency two days before a real election for one export button wasn't worth the risk.
+
+**Full Report (PDF):** also in the Export dropdown — generates a standalone print-ready page (turnout summary, call status breakdown, candidate results, full voter list) and opens your browser's print dialog; choose **Save as PDF** as the destination. This is deliberately *not* a server-side PDF library (`pdfkit`, or worse, `puppeteer`) — browser-native print-to-PDF needs zero new dependencies and cannot fail the way a PDF-generation library on a serverless function under time pressure could.
 
 ### Bulk CSV import
 
@@ -398,7 +402,7 @@ Every open device polls `GET /api/engineers` + `GET /api/stats` every 5 seconds 
 10. **🚨 Urgent / 📅 Today's Agenda / 📊 Analytics** — jump to these via the nav pills under the header.
 11. **Refresh** — re-fetches the latest data from the database (useful if someone else just acted from another device).
 12. **Import CSV** — bulk-add many engineers at once from a `.csv` file (see [Bulk CSV import](#bulk-csv-import) below).
-13. **Export CSV** — pick a report type (voter list, stats, candidates, call history, remarks) from the Export CSV dropdown.
+13. **Export** — pick CSV or Excel, then a report type (voter list, stats, candidates, call history, remarks); or choose **Full Report** to open a print-ready page you can Save as PDF.
 14. **Print** — clean, controls-free printout of the main page.
 15. **Reset All Votes** — clears the live "voted" flag for everyone; historical `votes`/`audit_log` rows are kept. Only use this before the real window opens (see the tradeoff note above).
 
@@ -451,7 +455,7 @@ A few more specifics for election day:
 - [ ] At 5:00 PM the banner flips to "🔴 VOTING CLOSED" and vote buttons disable automatically — again, no action needed.
 
 **After voting closes:**
-- [ ] **Export CSV** — pull the Full Voter List, Turnout Statistics, Candidate Results, and Call History reports for the official record.
+- [ ] **Export** — pull the Full Voter List, Turnout Statistics, Candidate Results, and Call History reports (CSV or Excel) for the official record, and generate a **Full Report PDF** (Export dropdown → Save as PDF) as a single-document snapshot.
 - [ ] **View Audit Log** to review the full trail if anything needs reconciling.
 - [ ] Consider taking the deployment offline or restricting write access afterward, since the API has no login and will otherwise stay open indefinitely.
 

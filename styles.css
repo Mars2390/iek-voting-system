@@ -92,7 +92,7 @@ body {
 .brand-text h1 { margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: 0.3px; }
 .brand-text p { margin: 2px 0 0; font-size: 0.85rem; color: #cfd2d8; }
 
-.header-actions { display: flex; align-items: center; gap: 14px; }
+.header-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
 .live-badge {
   display: inline-flex;
@@ -931,6 +931,29 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
 .export-dropdown button:last-child { border-bottom: none; }
 .export-dropdown button:hover { background: #f1f2f5; }
 
+.export-format-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: #f8faf9;
+}
+.export-dropdown .export-format-btn {
+  flex: 1;
+  text-align: center;
+  padding: 6px 8px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.export-dropdown .export-format-btn.active {
+  background: var(--ke-black);
+  border-color: var(--ke-black);
+  color: #fff;
+}
+
 /* ---------- Bulk action bar ---------- */
 .bulk-bar {
   display: flex;
@@ -1017,6 +1040,7 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
 .call-status-btn.selected { background: var(--ke-black); color: #fff; border-color: var(--ke-black); }
 
 /* Contact history combined timeline (Engineer Details modal) */
+.history-table-wrap { overflow-x: auto; }
 .history-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .history-table th, .history-table td {
   padding: 8px 10px;
@@ -1040,17 +1064,49 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
   .dashboard { grid-template-columns: repeat(2, 1fr); }
   .form-grid { grid-template-columns: 1fr; }
   .notification-dropdown { width: 280px; right: -60px; }
+  .analytics-stat-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 560px) {
   .dashboard { grid-template-columns: 1fr; }
   .header-inner { flex-direction: column; align-items: flex-start; }
+  .header-actions { width: 100%; gap: 8px; }
+  .live-badge, .identity-badge { font-size: 0.72rem; padding: 5px 10px; }
+  .bell-btn { width: 34px; height: 34px; font-size: 1rem; }
+  .clock { font-size: 0.72rem; }
+  .quick-nav { gap: 6px; padding: 8px 0 12px; }
+  .quick-nav-btn { font-size: 0.72rem; padding: 6px 10px; }
   .controls-row { flex-direction: column; align-items: stretch; }
   .filter-group { justify-content: center; }
   .stat-value { font-size: 2.1rem; }
   .btn-vote, .btn-undo, .btn-delete, .btn-icon-sm { width: 100%; justify-content: center; }
   .actions-cell { flex-direction: column; }
   .notification-dropdown { width: calc(100vw - 40px); right: -70px; }
+  .export-dropdown { width: calc(100vw - 40px); }
+
+  .analytics-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .charts-grid { grid-template-columns: 1fr; }
+  .chart-card { padding: 12px; }
+
+  .bulk-bar { flex-direction: column; align-items: stretch; }
+  .bulk-bar select, .bulk-bar button { width: 100%; }
+
+  .modal-overlay { padding: 10px; }
+  .modal { padding: 16px; max-height: 95vh; }
+  .call-status-grid { grid-template-columns: 1fr; }
+  .detail-grid { grid-template-columns: repeat(2, 1fr); }
+  .history-table-wrap { overflow-x: auto; }
+  .history-table { min-width: 480px; }
+
+  .candidates-grid { grid-template-columns: 1fr; }
+
+  #engineersTable, #urgentTable, #agendaTable { min-width: 640px; }
+}
+
+@media (max-width: 400px) {
+  .analytics-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .detail-grid { grid-template-columns: 1fr; }
+  .quick-nav-btn { flex: 1 1 calc(50% - 6px); text-align: center; justify-content: center; }
 }
 
 /* ---------- Print ---------- */

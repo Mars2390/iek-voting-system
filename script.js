@@ -38,6 +38,7 @@
   let hasLoadedOnce = false;
   let activeFilter = "all"; // all | voted | not-voted
   let activeContactFilter = ""; // "" | pending | confirmed | no_answer | busy_declined | follow_up | not_reachable
+  let activeExportFormat = "csv"; // csv | excel
   let isBusy = false;
   let selectedIds = new Set();
 
@@ -67,6 +68,7 @@
     importCsvInput: document.getElementById("importCsvInput"),
     exportCsvBtn: document.getElementById("exportCsvBtn"),
     exportDropdown: document.getElementById("exportDropdown"),
+    fullReportPdfBtn: document.getElementById("fullReportPdfBtn"),
     printBtn: document.getElementById("printBtn"),
     resetVotesBtn: document.getElementById("resetVotesBtn"),
     refreshBtn: document.getElementById("refreshBtn"),
@@ -349,10 +351,13 @@
 
   function toggleNotificationDropdown() {
     const willOpen = el.notificationDropdown.hidden;
-    el.notificationDropdown.hidden = !willOpen;
     if (willOpen) {
+      closeAllOverlays();
+      el.notificationDropdown.hidden = false;
       unseenCount = 0;
       renderNotifications();
+    } else {
+      el.notificationDropdown.hidden = true;
     }
   }
 
@@ -1031,10 +1036,19 @@
     }
   }
 
+  // ---------- Overlay management (only one modal/dropdown open at a time) ----------
+  function closeAllOverlays() {
+    el.callModalOverlay.hidden = true;
+    el.detailsModalOverlay.hidden = true;
+    el.notificationDropdown.hidden = true;
+    el.exportDropdown.hidden = true;
+  }
+
   // ---------- Log Call modal ----------
   function openCallModal(id) {
     const e = engineers.find((x) => String(x.id) === String(id));
     if (!e) return;
+    closeAllOverlays();
     ensureIdentity();
     callModalStatus = null;
     el.callEngineerId.value = e.id;
@@ -1084,6 +1098,7 @@
   async function openDetailsModal(id) {
     const e = engineers.find((x) => String(x.id) === String(id));
     if (!e) return;
+    closeAllOverlays();
 
     el.detailsModalName.textContent = `${e.name} (${e.iek_number})`;
     el.detailsModalBody.innerHTML = "<p>Loading history…</p>";
@@ -1113,14 +1128,16 @@
           <button class="btn btn-primary btn-sm" id="detailsLogCallBtn" data-id="${e.id}">&#128222; Log Call</button>
           <button class="btn btn-outline btn-sm" id="detailsAddRemarkBtn" data-id="${e.id}">&#128221; Add Remark</button>
         </div>
-        <table class="history-table">
-          <thead><tr><th>Date/Time</th><th>Action</th><th>Person</th><th>Notes</th></tr></thead>
-          <tbody>
-            ${timeline.length === 0
-              ? `<tr><td colspan="4">No history yet.</td></tr>`
-              : timeline.map((t) => `<tr><td>${formatDateTime(t.at)}</td><td>${escapeHtml(t.action)}</td><td>${escapeHtml(t.person || "")}</td><td>${escapeHtml(t.notes || "")}</td></tr>`).join("")}
-          </tbody>
-        </table>
+        <div class="history-table-wrap">
+          <table class="history-table">
+            <thead><tr><th>Date/Time</th><th>Action</th><th>Person</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${timeline.length === 0
+                ? `<tr><td colspan="4">No history yet.</td></tr>`
+                : timeline.map((t) => `<tr><td>${formatDateTime(t.at)}</td><td>${escapeHtml(t.action)}</td><td>${escapeHtml(t.person || "")}</td><td>${escapeHtml(t.notes || "")}</td></tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
       `;
       el.detailsModalBody.innerHTML = detailGrid;
 
@@ -1266,11 +1283,109 @@
 
   // ---------- Export / Print ----------
   function toggleExportDropdown() {
-    el.exportDropdown.hidden = !el.exportDropdown.hidden;
+    const willOpen = el.exportDropdown.hidden;
+    if (willOpen) {
+      closeAllOverlays();
+      el.exportDropdown.hidden = false;
+    } else {
+      el.exportDropdown.hidden = true;
+    }
   }
 
   function printResults() {
     window.print();
+  }
+
+  // "Full Report (PDF)": builds a standalone printable document with fresh
+  // data (stats, call-status breakdown, candidate results, full voter list)
+  // and opens the browser's print dialog. Choosing "Save as PDF" there is
+  // how this becomes a PDF — deliberately not a server-side PDF library
+  // (pdfkit/puppeteer are heavy, and puppeteer especially is a real risk to
+  // add on a serverless function two days before a real election). Every
+  // modern browser's native print-to-PDF is effectively zero-risk by
+  // comparison and needs no new dependency at all.
+  async function openFullReportPrintView() {
+    showToast("Generating full report…");
+    try {
+      const [stats, analytics, candidatesList, engineersList] = await Promise.all([
+        fetchStats(), fetchAnalytics(), fetchCandidates(), fetchEngineers(),
+      ]);
+
+      const win = window.open("", "_blank");
+      if (!win) {
+        showToast("Your browser blocked the report popup — allow popups for this site and try again.", true);
+        return;
+      }
+
+      const now = new Date().toLocaleString();
+
+      const statusRows = Object.entries(analytics.statusCounts).map(([status, count]) => `
+        <tr><td>${CONTACT_STATUS_ICONS[status] || ""} ${escapeHtml(CONTACT_STATUS_LABELS[status] || status)}</td><td>${count}</td></tr>
+      `).join("");
+
+      const candidateRows = candidatesList.map((c) => `
+        <tr><td>${escapeHtml(c.position)}</td><td>${escapeHtml(c.name)}</td><td>${c.votes}</td></tr>
+      `).join("");
+
+      const engineerRows = engineersList.map((e) => `
+        <tr>
+          <td>${escapeHtml(e.iek_number)}</td>
+          <td>${escapeHtml(e.name)}</td>
+          <td>${escapeHtml(e.phone || "")}</td>
+          <td>${e.voted ? "Voted" : "Not Voted"}</td>
+          <td>${escapeHtml(CONTACT_STATUS_LABELS[e.contact_status] || e.contact_status)}</td>
+        </tr>
+      `).join("");
+
+      win.document.write(`
+        <!DOCTYPE html>
+        <html><head><meta charset="utf-8"><title>IEK Full Report — ${now}</title>
+        <style>
+          body { font-family: Arial, Helvetica, sans-serif; padding: 24px; color: #1b1d22; }
+          h1 { margin-bottom: 4px; }
+          .subtitle { color: #6b7280; margin-bottom: 20px; }
+          h2 { margin-top: 28px; border-bottom: 2px solid #0a0a0a; padding-bottom: 4px; font-size: 16px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+          th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 12px; }
+          th { background: #0a0a0a; color: #fff; }
+          .stat-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+          .stat-box { border: 1px solid #ccc; border-radius: 6px; padding: 8px 14px; min-width: 110px; }
+          .stat-box .value { font-size: 20px; font-weight: 800; display: block; }
+          .stat-box .label { font-size: 10px; color: #6b7280; text-transform: uppercase; }
+          @media print { body { padding: 0; } }
+        </style></head><body>
+        <h1>IEK Online Voting System — Full Report</h1>
+        <p class="subtitle">Generated: ${now}</p>
+
+        <h2>Turnout Summary</h2>
+        <div class="stat-row">
+          <div class="stat-box"><span class="value">${stats.total}</span><span class="label">Total Registered</span></div>
+          <div class="stat-box"><span class="value">${stats.voted}</span><span class="label">Voted</span></div>
+          <div class="stat-box"><span class="value">${stats.notVoted}</span><span class="label">Not Voted</span></div>
+          <div class="stat-box"><span class="value">${stats.turnout}%</span><span class="label">Turnout</span></div>
+          <div class="stat-box"><span class="value">${stats.needsFollowUp}</span><span class="label">Needs Follow-up</span></div>
+        </div>
+
+        <h2>Call Status Breakdown</h2>
+        <table><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody>${statusRows}</tbody></table>
+
+        <h2>Candidate Results</h2>
+        ${candidatesList.length === 0
+          ? "<p>No candidates added yet.</p>"
+          : `<table><thead><tr><th>Position</th><th>Candidate</th><th>Votes</th></tr></thead><tbody>${candidateRows}</tbody></table>`}
+
+        <h2>Full Voter List (${engineersList.length})</h2>
+        <table><thead><tr><th>IEK Number</th><th>Name</th><th>Phone</th><th>Voted</th><th>Contact Status</th></tr></thead><tbody>${engineerRows}</tbody></table>
+        </body></html>
+      `);
+      win.document.close();
+      win.focus();
+      // Small delay so the new document has actually painted before the
+      // print dialog opens — printing an unrendered document can come out blank.
+      setTimeout(() => win.print(), 300);
+    } catch (err) {
+      showToast(`Failed to generate report: ${err.message}`, true);
+    }
   }
 
   // ---------- Audit log ----------
@@ -1339,10 +1454,22 @@
 
     el.exportCsvBtn.addEventListener("click", toggleExportDropdown);
     el.exportDropdown.addEventListener("click", (evt) => {
+      const formatBtn = evt.target.closest("button[data-format]");
+      if (formatBtn) {
+        activeExportFormat = formatBtn.getAttribute("data-format");
+        el.exportDropdown.querySelectorAll(".export-format-btn").forEach((b) => b.classList.remove("active"));
+        formatBtn.classList.add("active");
+        return; // keep the dropdown open so the user can now pick a report
+      }
+
       const btn = evt.target.closest("button[data-type]");
       if (!btn) return;
-      window.open(`/api/export?type=${btn.getAttribute("data-type")}`, "_blank");
+      window.open(`/api/export?type=${btn.getAttribute("data-type")}&format=${activeExportFormat}`, "_blank");
       el.exportDropdown.hidden = true;
+    });
+    el.fullReportPdfBtn.addEventListener("click", () => {
+      el.exportDropdown.hidden = true;
+      openFullReportPrintView();
     });
     document.addEventListener("click", (evt) => {
       if (!el.exportDropdown.hidden && !el.exportDropdown.contains(evt.target) && evt.target !== el.exportCsvBtn) {

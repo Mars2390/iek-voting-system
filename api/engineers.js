@@ -55,7 +55,10 @@ export default async function handler(req, res) {
       }
 
       if (req.method === "POST") {
-        const { iekNumber, name, phone, remarks } = req.body || {};
+        const { name, phone, remarks } = req.body || {};
+        // Uppercase for matching accuracy — see api/import.js for why
+        // (keeps manually-added and CSV-imported IEK numbers comparable).
+        const iekNumber = (req.body?.iekNumber || "").trim().toUpperCase();
 
         // Phone is intentionally optional here (the DB column is nullable) —
         // sometimes you need to register someone before you have their number.

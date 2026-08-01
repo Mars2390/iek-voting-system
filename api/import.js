@@ -119,7 +119,11 @@ export default async function handler(req, res) {
 
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
-      const iekNumber = getField(row, "iek_number");
+      // Uppercase the IEK number for matching accuracy — real formats
+      // (M.1234, F.1234, IEK001, A1234) are all uppercase; a stray lowercase
+      // entry would otherwise dedupe as a "different" person from the same
+      // real IEK number typed correctly elsewhere.
+      const iekNumber = getField(row, "iek_number").toUpperCase();
       const name = getField(row, "name");
       const phone = getField(row, "phone");
       const remarks = getField(row, "remarks");
@@ -135,8 +139,22 @@ export default async function handler(req, res) {
         ON CONFLICT (iek_number) DO NOTHING
         RETURNING id
       `;
-      if (result.length > 0) inserted += 1;
-      else skipped += 1;
+      if (result.length > 0) {
+        inserted += 1;
+        // Also write into the authored remarks table (not just the legacy
+        // column) so imported notes show up in the Details history timeline
+        // and count toward the "no remark in 2 days" follow-up check —
+        // otherwise a freshly-imported person with real notes could get
+        // wrongly flagged as needing a call.
+        if (remarks) {
+          await sql`
+            INSERT INTO remarks (engineer_id, author, remark)
+            VALUES (${result[0].id}, 'CSV Import', ${remarks})
+          `;
+        }
+      } else {
+        skipped += 1;
+      }
     }
 
     if (inserted > 0) {
