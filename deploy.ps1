@@ -133,4 +133,8 @@ Write-Host "`n  Vercel is watching this GitHub repo and will auto-build" -Foregr
 Write-Host "  and deploy within a couple of minutes." -ForegroundColor White
 Write-Host "  Check progress at: https://vercel.com/dashboard`n" -ForegroundColor Cyan
 
+Write-Host "  Reminder (Neon PostgreSQL backend):" -ForegroundColor DarkYellow
+Write-Host "  - DATABASE_URL must be set in Vercel Project Settings -> Environment Variables." -ForegroundColor DarkYellow
+Write-Host "  - If this is a fresh database, run schema.sql once, then POST /api/seed." -ForegroundColor DarkYellow
+
 Stop-WithPause 0

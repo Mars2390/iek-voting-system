@@ -75,6 +75,13 @@
     </div>
   </div>
 
+  <!-- Connection error banner -->
+  <div id="connectionBanner" class="connection-banner" role="alert" hidden>
+    <span class="connection-banner-icon">&#9888;&#65039;</span>
+    <span id="connectionBannerText">Could not connect to the database.</span>
+    <button class="btn btn-outline btn-sm" id="retryConnectionBtn" type="button">Retry</button>
+  </div>
+
   <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
@@ -97,6 +104,13 @@
       <button class="btn btn-primary" id="toggleFormBtn" type="button">
         <span>&#65291;</span> Add Engineer
       </button>
+      <button class="btn btn-secondary" id="refreshBtn" type="button">
+        <span>&#128260;</span> Refresh
+      </button>
+      <button class="btn btn-secondary" id="importCsvBtn" type="button">
+        <span>&#11014;&#65039;</span> Import CSV
+      </button>
+      <input type="file" id="importCsvInput" accept=".csv,text/csv" hidden>
       <button class="btn btn-secondary" id="exportCsvBtn" type="button">
         <span>&#11015;&#65039;</span> Export CSV
       </button>
@@ -162,7 +176,7 @@
       </table>
     </div>
     <div id="emptyState" class="empty-state" hidden>
-      <p>&#128203; No engineers found. Try clearing search/filters or add a new engineer.</p>
+      <p>&#128203; No engineers found. Try clearing search/filters, add a new engineer, or seed sample data via <code>POST /api/seed</code>.</p>
     </div>
   </section>
 

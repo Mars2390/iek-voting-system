@@ -1,16 +1,16 @@
 /* =========================================================
    IEK Online Voting System — Application Logic
-   Data persistence: localStorage (works fully offline & online)
+   Data persistence: Neon PostgreSQL via Vercel Functions (/api/*)
+   All localStorage code has been removed — every action hits
+   the API, so every visitor sees the same live data.
    ========================================================= */
 
 (function () {
   "use strict";
 
-  const STORAGE_KEY = "iek_voting_engineers_v1";
-
-  /** @type {Array<Object>} */
   let engineers = [];
   let activeFilter = "all"; // all | voted | not-voted
+  let isBusy = false;
 
   // ---------- DOM references ----------
   const el = {
@@ -26,24 +26,26 @@
     formSubmitBtn: document.getElementById("formSubmitBtn"),
     engineerForm: document.getElementById("engineerForm"),
     engineerId: document.getElementById("engineerId"),
+    importCsvBtn: document.getElementById("importCsvBtn"),
+    importCsvInput: document.getElementById("importCsvInput"),
     exportCsvBtn: document.getElementById("exportCsvBtn"),
     printBtn: document.getElementById("printBtn"),
     resetVotesBtn: document.getElementById("resetVotesBtn"),
+    refreshBtn: document.getElementById("refreshBtn"),
     toast: document.getElementById("toast"),
     statTotal: document.getElementById("statTotal"),
     statVoted: document.getElementById("statVoted"),
     statNotVoted: document.getElementById("statNotVoted"),
     statTurnout: document.getElementById("statTurnout"),
     turnoutBarFill: document.getElementById("turnoutBarFill"),
+    connectionBanner: document.getElementById("connectionBanner"),
+    connectionBannerText: document.getElementById("connectionBannerText"),
+    retryConnectionBtn: document.getElementById("retryConnectionBtn"),
     clock: document.getElementById("clock"),
     year: document.getElementById("year"),
   };
 
   // ---------- Utilities ----------
-  function uid() {
-    return "eng_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  }
-
   function escapeHtml(str) {
     return String(str ?? "").replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -68,60 +70,69 @@
     showToast._t = setTimeout(() => el.toast.classList.remove("show"), 2800);
   }
 
-  function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(engineers));
+  function showConnectionError(message) {
+    el.connectionBannerText.textContent = message;
+    el.connectionBanner.hidden = false;
   }
 
-  // ---------- Seed data ----------
-  function seedData() {
-    const raw = [
-      ["Eng. James Ochieng", "IEK001", "0712345678"],
-      ["Eng. Mary Wanjiru", "IEK002", "0723456789"],
-      ["Eng. Peter Mwangi", "IEK003", "0734567890"],
-      ["Eng. Sarah Akinyi", "IEK004", "0745678901"],
-      ["Eng. David Odhiambo", "IEK005", "0756789012"],
-      ["Eng. Grace Njeri", "IEK006", "0767890123"],
-      ["Eng. Michael Otieno", "IEK007", "0778901234"],
-      ["Eng. Faith Wambui", "IEK008", "0789012345"],
-    ];
-    return raw.map(([fullName, iekNumber, phone]) => ({
-      id: uid(),
-      iekNumber,
-      fullName,
-      phone,
-      status: "not-voted",
-      remarks: "",
-      votedAt: null,
-      dateAdded: new Date().toISOString(),
-    }));
+  function hideConnectionError() {
+    el.connectionBanner.hidden = true;
   }
 
-  function load() {
+  function setBusy(busy) {
+    isBusy = busy;
+    document.body.classList.toggle("is-busy", busy);
+  }
+
+  // ---------- API layer ----------
+  async function apiFetch(url, options) {
+    let response;
     try {
-      const rawStored = localStorage.getItem(STORAGE_KEY);
-      engineers = rawStored ? JSON.parse(rawStored) : seedData();
-    } catch (e) {
-      engineers = seedData();
+      response = await fetch(url, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+    } catch (networkErr) {
+      throw new Error("Network error — could not reach the server. Check your internet connection.");
     }
-    if (!Array.isArray(engineers) || engineers.length === 0) {
-      engineers = seedData();
+
+    let body = null;
+    try {
+      body = await response.json();
+    } catch (parseErr) {
+      // response had no JSON body (e.g. 204) — fine for some endpoints
     }
-    save();
+
+    if (!response.ok) {
+      const message = (body && body.error) || `Request failed with status ${response.status}.`;
+      throw new Error(message);
+    }
+
+    return body;
   }
 
-  // ---------- Filtering ----------
+  async function fetchEngineers() {
+    const data = await apiFetch("/api/engineers");
+    return data.engineers;
+  }
+
+  async function fetchStats() {
+    return apiFetch("/api/stats");
+  }
+
+  // ---------- Filtering (client-side, over the last loaded list) ----------
   function getFiltered() {
     const q = el.searchInput.value.trim().toLowerCase();
 
     return engineers.filter((e) => {
       const matchesQuery = !q ||
-        e.fullName.toLowerCase().includes(q) ||
-        e.iekNumber.toLowerCase().includes(q) ||
-        e.phone.toLowerCase().includes(q);
+        e.name.toLowerCase().includes(q) ||
+        e.iek_number.toLowerCase().includes(q) ||
+        (e.phone || "").toLowerCase().includes(q);
       const matchesFilter =
         activeFilter === "all" ||
-        (activeFilter === "voted" && e.status === "voted") ||
-        (activeFilter === "not-voted" && e.status === "not-voted");
+        (activeFilter === "voted" && e.voted) ||
+        (activeFilter === "not-voted" && !e.voted);
       return matchesQuery && matchesFilter;
     });
   }
@@ -139,19 +150,19 @@
       el.emptyState.hidden = true;
 
       el.tableBody.innerHTML = list.map((e) => {
-        const voted = e.status === "voted";
+        const voted = !!e.voted;
         const remarks = e.remarks ? escapeHtml(e.remarks) : '<span class="remarks-text empty">No remarks</span>';
 
         return `
         <tr data-id="${e.id}" class="${voted ? "row-voted" : "row-not-voted"}">
-          <td><span class="iek-number">${escapeHtml(e.iekNumber)}</span></td>
+          <td><span class="iek-number">${escapeHtml(e.iek_number)}</span></td>
           <td>
             <div class="candidate-cell">
-              <div class="avatar">${escapeHtml(initials(e.fullName))}</div>
-              <span>${escapeHtml(e.fullName)}</span>
+              <div class="avatar">${escapeHtml(initials(e.name))}</div>
+              <span>${escapeHtml(e.name)}</span>
             </div>
           </td>
-          <td>${escapeHtml(e.phone)}</td>
+          <td>${escapeHtml(e.phone || "")}</td>
           <td>
             <span class="status-badge ${voted ? "voted" : "not-voted"}">
               ${voted ? "&#9989; Voted" : "&#10060; Not Voted"}
@@ -172,21 +183,32 @@
         </tr>`;
       }).join("");
     }
-
-    updateStats();
   }
 
-  function updateStats() {
-    const total = engineers.length;
-    const voted = engineers.filter((e) => e.status === "voted").length;
-    const notVoted = total - voted;
-    const turnout = total ? Math.round((voted / total) * 100) : 0;
+  function renderStats(stats) {
+    el.statTotal.textContent = stats.total;
+    el.statVoted.textContent = stats.voted;
+    el.statNotVoted.textContent = stats.notVoted;
+    el.statTurnout.textContent = `${stats.turnout}%`;
+    el.turnoutBarFill.style.width = `${stats.turnout}%`;
+  }
 
-    el.statTotal.textContent = total;
-    el.statVoted.textContent = voted;
-    el.statNotVoted.textContent = notVoted;
-    el.statTurnout.textContent = `${turnout}%`;
-    el.turnoutBarFill.style.width = `${turnout}%`;
+  // ---------- Load everything from the API ----------
+  async function loadAll({ silent } = {}) {
+    setBusy(true);
+    try {
+      const [engineersList, stats] = await Promise.all([fetchEngineers(), fetchStats()]);
+      engineers = engineersList;
+      hideConnectionError();
+      render();
+      renderStats(stats);
+      if (!silent) showToast("Data refreshed from the database.");
+    } catch (err) {
+      showConnectionError(err.message || "Could not load data from the database.");
+      if (!silent) showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // ---------- Form (Add / Edit) ----------
@@ -200,14 +222,14 @@
   }
 
   function openFormForEdit(id) {
-    const e = engineers.find((x) => x.id === id);
+    const e = engineers.find((x) => String(x.id) === String(id));
     if (!e) return;
     el.engineerId.value = e.id;
-    document.getElementById("iekNumber").value = e.iekNumber;
-    document.getElementById("fullName").value = e.fullName;
-    document.getElementById("phone").value = e.phone;
+    document.getElementById("iekNumber").value = e.iek_number;
+    document.getElementById("fullName").value = e.name;
+    document.getElementById("phone").value = e.phone || "";
     document.getElementById("remarks").value = e.remarks || "";
-    el.formTitle.textContent = `Edit Engineer — ${e.fullName}`;
+    el.formTitle.textContent = `Edit Engineer — ${e.name}`;
     el.formSubmitBtn.textContent = "Update Engineer";
     el.formPanel.hidden = false;
     document.getElementById("iekNumber").focus();
@@ -219,145 +241,170 @@
     el.formPanel.hidden = true;
   }
 
-  function submitForm(evt) {
+  async function submitForm(evt) {
     evt.preventDefault();
+    if (isBusy) return;
 
     const id = el.engineerId.value;
     const iekNumber = document.getElementById("iekNumber").value.trim();
-    const fullName = document.getElementById("fullName").value.trim();
+    const name = document.getElementById("fullName").value.trim();
     const phone = document.getElementById("phone").value.trim();
     const remarks = document.getElementById("remarks").value.trim();
 
-    if (!iekNumber || !fullName || !phone) {
+    if (!iekNumber || !name || !phone) {
       showToast("Please fill in all required fields.", true);
       return;
     }
 
-    const dupe = engineers.some(
-      (e) => e.iekNumber.toLowerCase() === iekNumber.toLowerCase() && e.id !== id
-    );
-    if (dupe) {
-      showToast("An engineer with this IEK number already exists.", true);
-      return;
+    setBusy(true);
+    try {
+      if (id) {
+        await apiFetch(`/api/engineers/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ name, phone, remarks }),
+        });
+        showToast(`${name} updated successfully.`);
+      } else {
+        await apiFetch("/api/engineers", {
+          method: "POST",
+          body: JSON.stringify({ iekNumber, name, phone, remarks }),
+        });
+        showToast(`${name} registered successfully.`);
+      }
+      closeForm();
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
     }
-
-    if (id) {
-      const e = engineers.find((x) => x.id === id);
-      if (!e) return;
-      e.iekNumber = iekNumber;
-      e.fullName = fullName;
-      e.phone = phone;
-      e.remarks = remarks;
-      showToast(`${fullName} updated successfully.`);
-    } else {
-      engineers.push({
-        id: uid(),
-        iekNumber,
-        fullName,
-        phone,
-        remarks,
-        status: "not-voted",
-        votedAt: null,
-        dateAdded: new Date().toISOString(),
-      });
-      showToast(`${fullName} registered successfully.`);
-    }
-
-    save();
-    closeForm();
-    render();
   }
 
   // ---------- Actions ----------
-  function deleteEngineer(id) {
-    const e = engineers.find((x) => x.id === id);
+  async function deleteEngineer(id) {
+    const e = engineers.find((x) => String(x.id) === String(id));
     if (!e) return;
-    if (!confirm(`Remove ${e.fullName} (${e.iekNumber}) from the register? This cannot be undone.`)) return;
-    engineers = engineers.filter((x) => x.id !== id);
-    save();
-    render();
-    showToast(`${e.fullName} has been removed.`);
+    if (!confirm(`Remove ${e.name} (${e.iek_number}) from the register? This cannot be undone.`)) return;
+
+    setBusy(true);
+    try {
+      await apiFetch(`/api/engineers/${id}`, { method: "DELETE" });
+      showToast(`${e.name} has been removed.`);
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function markVoted(id) {
-    const e = engineers.find((x) => x.id === id);
-    if (!e) return;
-    if (e.status === "voted") return;
-    if (!confirm(`Confirm that ${e.fullName} (${e.iekNumber}) has cast their vote?`)) return;
-    e.status = "voted";
-    e.votedAt = new Date().toISOString();
-    save();
-    render();
-    showToast(`${e.fullName} marked as Voted.`);
+  async function markVoted(id) {
+    const e = engineers.find((x) => String(x.id) === String(id));
+    if (!e || e.voted) return;
+    if (!confirm(`Confirm that ${e.name} (${e.iek_number}) has cast their vote?`)) return;
+
+    setBusy(true);
+    try {
+      await apiFetch(`/api/engineers/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ voted: true }),
+      });
+      showToast(`${e.name} marked as Voted.`);
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function undoVote(id) {
-    const e = engineers.find((x) => x.id === id);
+  async function undoVote(id) {
+    const e = engineers.find((x) => String(x.id) === String(id));
     if (!e) return;
-    if (!confirm(`Undo voting status for ${e.fullName} (${e.iekNumber})?`)) return;
-    e.status = "not-voted";
-    e.votedAt = null;
-    save();
-    render();
-    showToast(`Voting status reverted for ${e.fullName}.`);
+    if (!confirm(`Undo voting status for ${e.name} (${e.iek_number})?`)) return;
+
+    setBusy(true);
+    try {
+      await apiFetch(`/api/engineers/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ voted: false }),
+      });
+      showToast(`Voting status reverted for ${e.name}.`);
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function editRemarks(id) {
-    const e = engineers.find((x) => x.id === id);
+  async function editRemarks(id) {
+    const e = engineers.find((x) => String(x.id) === String(id));
     if (!e) return;
-    const value = prompt(`Remarks for ${e.fullName} (${e.iekNumber}):`, e.remarks || "");
+    const value = prompt(`Remarks for ${e.name} (${e.iek_number}):`, e.remarks || "");
     if (value === null) return;
-    e.remarks = value.trim();
-    save();
-    render();
-    showToast("Remarks updated.");
+
+    setBusy(true);
+    try {
+      await apiFetch(`/api/engineers/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ remarks: value.trim() }),
+      });
+      showToast("Remarks updated.");
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function resetAllVotes() {
+  async function resetAllVotes() {
     if (!confirm("Reset ALL voting statuses to 'Not Voted'? This cannot be undone.")) return;
-    engineers.forEach((e) => {
-      e.status = "not-voted";
-      e.votedAt = null;
-    });
-    save();
-    render();
-    showToast("All voting statuses have been reset.");
+
+    setBusy(true);
+    try {
+      await apiFetch("/api/reset-votes", { method: "POST" });
+      showToast("All voting statuses have been reset.");
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- Bulk import ----------
+  async function handleImportFile(evt) {
+    const file = evt.target.files[0];
+    evt.target.value = ""; // allow re-selecting the same file next time
+    if (!file) return;
+
+    const text = await file.text();
+    setBusy(true);
+    try {
+      const result = await apiFetch("/api/import", {
+        method: "POST",
+        body: JSON.stringify({ csv: text }),
+      });
+
+      let msg = `Imported ${result.inserted} engineer${result.inserted === 1 ? "" : "s"}.`;
+      if (result.skipped) msg += ` ${result.skipped} skipped (already existed).`;
+      if (result.errors && result.errors.length) msg += ` ${result.errors.length} row(s) had errors.`;
+
+      const isMostlyError = result.inserted === 0 && result.errors && result.errors.length > 0;
+      showToast(msg, isMostlyError);
+      await loadAll({ silent: true });
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // ---------- Export / Print ----------
   function exportCSV() {
-    if (engineers.length === 0) {
-      showToast("No data to export.", true);
-      return;
-    }
-    const headers = ["IEK Number", "Name", "Phone", "Status", "Remarks", "Voted At", "Date Added"];
-    const rows = engineers.map((e) => [
-      e.iekNumber,
-      e.fullName,
-      e.phone,
-      e.status === "voted" ? "Voted" : "Not Voted",
-      e.remarks,
-      e.votedAt || "",
-      e.dateAdded,
-    ]);
-
-    const csvEscape = (val) => {
-      const s = String(val ?? "");
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-
-    const csv = [headers, ...rows].map((r) => r.map(csvEscape).join(",")).join("\r\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const stamp = new Date().toISOString().slice(0, 10);
-    link.href = url;
-    link.download = `IEK_Voting_Results_${stamp}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    showToast("Results exported to CSV.");
+    window.open("/api/export", "_blank");
   }
 
   function printResults() {
@@ -394,13 +441,17 @@
       });
     });
 
+    el.importCsvBtn.addEventListener("click", () => el.importCsvInput.click());
+    el.importCsvInput.addEventListener("change", handleImportFile);
     el.exportCsvBtn.addEventListener("click", exportCSV);
     el.printBtn.addEventListener("click", printResults);
     el.resetVotesBtn.addEventListener("click", resetAllVotes);
+    el.refreshBtn.addEventListener("click", () => loadAll());
+    el.retryConnectionBtn.addEventListener("click", () => loadAll());
 
     el.tableBody.addEventListener("click", (evt) => {
       const btn = evt.target.closest("button[data-action]");
-      if (!btn) return;
+      if (!btn || isBusy) return;
       const id = btn.getAttribute("data-id");
       const action = btn.getAttribute("data-action");
       if (action === "vote") markVoted(id);
@@ -413,12 +464,11 @@
 
   // ---------- Init ----------
   function init() {
-    load();
     bindEvents();
     el.year.textContent = new Date().getFullYear();
     tickClock();
     setInterval(tickClock, 1000);
-    render();
+    loadAll({ silent: true });
   }
 
   document.addEventListener("DOMContentLoaded", init);

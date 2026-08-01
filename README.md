@@ -1,44 +1,192 @@
 # IEK Online Voting System
 
-A professional, single-page web application for tracking voter turnout at Institution of Engineers of Kenya (IEK) elections — engineer registration, marking votes cast, live turnout statistics, search/filtering, CSV export, and print-ready reports, themed in the colors of the Kenyan flag.
+A voter turnout tracking system for Institution of Engineers of Kenya (IEK) elections, backed by **Neon PostgreSQL** and deployed as **Vercel Functions** — real, shared, persistent data that every visitor sees identically, themed in the colors of the Kenyan flag.
 
-![Status](https://img.shields.io/badge/status-active-brightgreen) ![Deploy](https://img.shields.io/badge/deploy-Vercel-black) ![License](https://img.shields.io/badge/license-MIT-black)
-
----
-
-## Description
-
-The IEK Online Voting System is a lightweight, single-page application (SPA) built with plain HTML, CSS, and JavaScript — no framework, no build step, no server required. It lets election officials register engineers, mark them as **Voted** or **Not Voted** as they check in, attach remarks per record, and monitor live turnout through a statistics dashboard and filterable table.
-
-All data is stored locally in the browser via `localStorage`, so the app works **fully offline** (no internet connection needed once loaded) and **fully online** when deployed to Vercel or any static host — the same files run either way with zero configuration changes.
-
-> **Note on election integrity:** Because this version stores data in the browser's `localStorage`, each device/browser keeps its own independent register. It is best suited for a single supervised voting station (e.g. one check-in desk at a branch AGM), demos, or as a front-end reference to wire up to a real shared backend. See [Scaling to Production](#scaling-to-production) below for running this across multiple devices with one shared, tamper-resistant register.
+![Status](https://img.shields.io/badge/status-active-brightgreen) ![DB](https://img.shields.io/badge/database-Neon%20PostgreSQL-00e599) ![Deploy](https://img.shields.io/badge/deploy-Vercel-black) ![License](https://img.shields.io/badge/license-MIT-black)
 
 ---
 
-## Features
+## What changed from the localStorage version
 
-- 🇰🇪 **Kenyan-themed UI** — black, red, green and white color scheme with an animated flag strip
-- 📊 **Live statistics dashboard** — Total Registered, Voted, Not Voted, and Turnout % with an animated turnout bar
-- 📋 **Engineers table** — IEK Number, Name, Phone, Status, and Remarks columns
-- ➕ **Add Engineer form** — register with IEK Number, Full Name, Phone, and optional Remarks
-- ✏️ **Edit & remove** — update any engineer's details or remove them from the register
-- 🔍 **Search bar** — instantly filter by name, IEK number, or phone
-- 🧰 **Filter buttons** — one-click toggle between All / Voted / Not Voted
-- 🗳️ **Mark as Voted** — confirmation-protected vote button with an **Undo** option for corrections
-- 📝 **Remarks** — attach or edit a note against any engineer (e.g. "Voted by proxy", "ID verified")
-- 💾 **Persistent storage** — all data is saved to `localStorage` and survives refreshes and offline use
-- 📤 **CSV export** — download the full register (including status and remarks) as a spreadsheet
-- 🖨️ **Print-friendly report** — dedicated print stylesheet hides controls/forms for a clean printout
-- ♻️ **Reset all votes** — zero out every status back to "Not Voted" to start a fresh round
-- 📱 **Fully responsive** — works on desktop, tablet, and mobile
-- ▲ **Vercel-ready** — includes `vercel.json` and `package.json` for one-command deployment
+This is a full rewrite of the earlier prototype. The old version stored engineers in each browser's `localStorage`, so every device had its own independent copy of "who voted." That's gone. Now:
+
+- All data lives in a real **Neon PostgreSQL** database.
+- The frontend (`script.js`) talks to a real API (`/api/*`, Vercel Functions) instead of `localStorage`.
+- Every action — register, vote, undo, edit remarks, delete, reset — is a database write, visible to **every** visitor immediately (after a refresh/re-fetch).
+- Every mutating action is recorded in an `audit_log` table, and every vote is recorded in a `votes` table, independent of the engineers table's live `voted` flag.
+
+**⚠️ Before you treat this as ready for a real election, read [Security note](#security-note-please-read) below.** The API endpoints that add/edit/delete/vote have no authentication — anyone who finds your URL can call them directly (bypassing the UI). This matches exactly what was asked for in this rewrite (frontend + DB + API, no login system), but it's a real gap for a genuine election and is called out explicitly rather than glossed over.
 
 ---
 
-## Sample Data
+## Architecture
 
-The app ships pre-seeded with 8 sample engineers (all starting as "Not Voted") so the table is populated on first load:
+```
+Browser (index.html/script.js)
+        │  fetch() — JSON over HTTPS
+        ▼
+Vercel Functions (/api/*.js)
+        │  @neondatabase/serverless (HTTP-based Postgres driver)
+        ▼
+Neon PostgreSQL (engineers, votes, audit_log tables)
+```
+
+No Express server, no `pg` connection pooling, no client-side database credentials — each `/api/*.js` file is an independent serverless function that opens a lightweight HTTP connection to Neon per request via `@neondatabase/serverless`, which is purpose-built for this (see [Note on dependencies](#note-on-dependencies) below).
+
+---
+
+## Project Structure
+
+```
+IEK-VOTING-FULL/
+├── index.html              # Main page (dashboard, form, table, connection banner)
+├── styles.css              # Kenyan theme, responsive layout, animations
+├── script.js               # Frontend logic — fetch()-based, no localStorage
+├── schema.sql               # Run once against Neon to create tables
+├── api/
+│   ├── _db.js                # Shared Neon connection (lazy-initialized)
+│   ├── _utils.js              # CORS, audit logging, IP extraction, error helper
+│   ├── engineers.js           # GET (list) / POST (create)
+│   ├── engineers/
+│   │   └── [id].js              # PUT (update/vote) / DELETE
+│   ├── stats.js               # GET — total/voted/notVoted/turnout
+│   ├── reset-votes.js         # POST — reset all engineers to "not voted"
+│   ├── export.js              # GET — CSV download
+│   ├── seed.js                # POST — insert the 8 sample engineers
+│   └── import.js              # POST — bulk-add engineers from CSV text
+├── setup.js                  # One-command bootstrap: tables + seed + git push + deploy
+├── .env.example             # Template for required env vars (committed)
+├── .env.local                # Your real local DATABASE_URL (gitignored)
+├── package.json
+├── vercel.json
+├── .gitignore
+├── DEPLOY.bat / deploy.ps1   # One-click git add/commit/push
+└── README.md
+```
+
+---
+
+## Quickest path: `node setup.js`
+
+If `.env.local` already has your real Neon `DATABASE_URL` in it, one command does steps 3–8 below in order: installs dependencies, connects to Neon, creates tables, seeds the 8 sample engineers, verifies `package.json`/`vercel.json`, then commits and pushes to GitHub (which triggers Vercel's auto-deploy), with a best-effort `vercel --prod` if the Vercel CLI is installed and logged in.
+
+```bash
+node setup.js
+```
+
+**Why `setup.js` never contains your password:** it reads `DATABASE_URL` from `.env.local` at runtime instead of having it hardcoded. That file commits and pushes itself to GitHub as part of what it does — anything hardcoded inside it would get pushed to your repo right along with it, permanently, in git history. Keeping the real connection string only in the git-ignored `.env.local` is what makes it safe for `setup.js` itself to be committed. The script also refuses to commit if it ever detects a `.env`/`.env.local` file staged, as a second layer of protection.
+
+It's also fully idempotent — re-run it any time (e.g., after adding rows to the DB or pulling new commits) and it will skip anything already done (existing tables, existing engineers, a clean working tree) rather than erroring out.
+
+---
+
+## 1. Set up Neon PostgreSQL
+
+1. Go to **https://neon.tech** and sign up (the free tier is enough for this).
+2. Create a new project (any name, any region close to your Vercel deployment region).
+3. In the Neon Console, open **Connection Details** and copy the **pooled connection string** (it looks like `postgresql://user:password@ep-xxxx-pooler.region.aws.neon.tech/dbname?sslmode=require`). Use the *pooled* string, not the direct one — it's the one meant for serverless functions.
+4. Open the **SQL Editor** in the Neon Console, paste in the contents of [`schema.sql`](schema.sql), and run it. This creates the `engineers`, `votes`, and `audit_log` tables.
+
+> Alternative: if you have `psql` installed locally, run `psql "$DATABASE_URL" -f schema.sql` instead of using the web SQL Editor.
+
+### Schema (as created by `schema.sql`)
+
+```sql
+CREATE TABLE engineers (
+    id SERIAL PRIMARY KEY,
+    iek_number VARCHAR(20) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    phone VARCHAR(20),
+    voted BOOLEAN DEFAULT FALSE,
+    remarks TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE votes (
+    id SERIAL PRIMARY KEY,
+    engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+    voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    voter_ip VARCHAR(50)
+);
+
+CREATE TABLE audit_log (
+    id SERIAL PRIMARY KEY,
+    action VARCHAR(50),
+    engineer_id INTEGER REFERENCES engineers(id) ON DELETE SET NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_ip VARCHAR(50)
+);
+```
+
+**Two deliberate changes from the exact DDL originally specified:** `votes.engineer_id` now has `ON DELETE CASCADE` and `audit_log.engineer_id` has `ON DELETE SET NULL`. Without these, deleting an engineer would fail with a foreign-key violation the moment they had a vote or any audit history — which, in a real election, is most engineers. See the comments in `schema.sql` for the reasoning.
+
+---
+
+## 2. Configure environment variables
+
+### Local development
+1. Copy the template: your `.env.local` file already exists with a placeholder — open it and replace the placeholder with your real Neon connection string from step 1.3 above:
+   ```
+   DATABASE_URL=postgresql://your-real-connection-string-here
+   ```
+2. `.env.local` is already in `.gitignore` — it will never be committed.
+
+### Production (Vercel)
+1. Go to your Vercel project → **Settings → Environment Variables**.
+2. Add `DATABASE_URL` with the same Neon connection string, scoped to **Production** (and Preview, if you want preview deployments to hit the same database — or create a second Neon branch/database for previews).
+3. Optionally add `SEED_SECRET` (any random string) to lock down `POST /api/seed` — see [Security note](#security-note-please-read).
+4. Redeploy (or push a commit) after adding env vars — Vercel Functions only pick up new env vars on a fresh deployment.
+
+You can also sync env vars with the Vercel CLI:
+```bash
+npm i -g vercel
+vercel link
+vercel env pull .env.local
+```
+
+---
+
+## 3. Install dependencies & run locally
+
+```bash
+npm install
+npm i -g vercel   # if not already installed
+vercel dev
+```
+
+`vercel dev` serves both the static frontend **and** the `/api/*` functions locally with your `.env.local` variables loaded — this is required for the app to work locally (a plain static file server like `npx serve` will load the HTML/CSS/JS but every `fetch('/api/...')` call will 404).
+
+### Note on dependencies
+
+The original ask listed `express`, `pg`, and `cors` as dependencies. This project ships with only **`@neondatabase/serverless`** and doesn't include those three. Reasoning:
+
+- **Express** — Vercel Functions in the `/api` folder are independent per-file handlers, not routes mounted on one Express app; there's no server object for Express middleware to attach to. Adding it would be dead weight.
+- **`pg`** — this uses raw TCP connections, which don't pool well across many short-lived serverless invocations. `@neondatabase/serverless` is Neon's own HTTP-based driver, purpose-built for exactly this environment, and is what Vercel's own storage guidance recommends.
+- **`cors`** — that's Express middleware. CORS headers are set manually in `api/_utils.js` (`applyCors`) instead, which is simpler for standalone handler functions.
+
+If you actually want a unified Express server (e.g. to run this outside Vercel too), say so and it can be restructured — but as shipped, those three packages would sit unused in `node_modules`.
+
+---
+
+## 4. Seed the sample data
+
+Once your schema is created and `DATABASE_URL` is set, seed the 8 sample engineers:
+
+```bash
+# Local (vercel dev running on port 3000)
+curl -X POST http://localhost:3000/api/seed
+
+# Production
+curl -X POST https://your-project.vercel.app/api/seed
+```
+
+If you set `SEED_SECRET`, include it:
+```bash
+curl -X POST https://your-project.vercel.app/api/seed -H "x-seed-key: your-secret-here"
+```
+
+Seeding is idempotent — engineers with an already-existing IEK number are skipped, so it's safe to call more than once.
 
 | IEK Number | Name | Phone |
 |---|---|---|
@@ -51,92 +199,95 @@ The app ships pre-seeded with 8 sample engineers (all starting as "Not Voted") s
 | IEK007 | Eng. Michael Otieno | 0778901234 |
 | IEK008 | Eng. Faith Wambui | 0789012345 |
 
-Remove or edit these at any time from the table.
-
 ---
 
-## Project Structure
+## 5. Deploy to Vercel
 
-```
-IEK-VOTING-FULL/
-├── index.html      # Main HTML structure (dashboard, form, table)
-├── styles.css      # All styling (Kenyan theme, responsive layout, animations)
-├── script.js       # All application logic (CRUD, status, search, export, print)
-├── vercel.json     # Vercel deployment configuration
-├── package.json    # Project metadata & scripts for Vercel/local dev
-├── .gitignore      # Files excluded from version control
-└── README.md       # Project documentation
-```
-
----
-
-## Installation Guide
-
-No build tools or package installation are required to run the app — it's static HTML/CSS/JS.
-
-### Option 1 — Open directly (offline)
-1. Download or clone this folder.
-2. Double-click `index.html` to open it in your browser.
-
-### Option 2 — Run a local dev server
 ```bash
-npm install -g vercel   # optional, only needed for Vercel CLI features
-npm run dev             # serves the app at http://localhost:3000
+vercel --prod
 ```
 
-### Option 3 — Deploy to Vercel (online)
+or push to GitHub (Vercel's Git integration auto-deploys), or double-click `DEPLOY.bat` if this repo is already linked to GitHub + Vercel — see [Deployment scripts](#deployment-scripts) below.
 
-**Via CLI:**
-```bash
-npm i -g vercel
-vercel login
-vercel            # deploy a preview
-vercel --prod     # deploy to production
-```
-
-**Via Git integration:**
-1. Push this folder to a GitHub/GitLab/Bitbucket repository.
-2. Go to [vercel.com/new](https://vercel.com/new) and import the repository.
-3. Vercel auto-detects it as a static site (no framework, no build command needed) — click **Deploy**.
-4. Your voting system will be live at `https://<your-project>.vercel.app`.
-
-Because everything runs client-side with `localStorage`, the deployed site works identically whether the visitor is online or has gone offline after the first page load.
+Vercel auto-detects the `/api` folder as Functions; no build step is required for the static frontend (`outputDirectory` is set to `.` in `vercel.json`).
 
 ---
 
-## How to Use
+## API Reference
 
-1. **View the dashboard** — see Total Registered, Voted, Not Voted, and Turnout % update live as votes are marked.
-2. **Register an engineer** — click **➕ Add Engineer**, fill in IEK Number, Full Name, Phone (and optional Remarks), then submit.
-3. **Search** — type a name, IEK number, or phone into the search bar to instantly filter the table.
-4. **Filter by status** — use the **All / Voted / Not Voted** buttons to narrow the table.
-5. **Mark a vote** — click **Mark Voted** next to an engineer; confirm the prompt. Use **Undo** to revert a mistaken entry.
-6. **Add remarks** — click **Remarks** on any row to attach or edit a note (e.g. verification notes).
-7. **Edit a record** — click **Edit** to update an engineer's IEK number, name, phone, or remarks.
-8. **Remove a record** — click **Remove** to delete an engineer from the register (with confirmation).
-9. **Export results** — click **Export CSV** to download the full register as a spreadsheet.
-10. **Print a report** — click **Print** for a clean, controls-free printout.
-11. **Start a new round** — click **Reset All Votes** to set every engineer back to "Not Voted".
+All endpoints return JSON (except `/api/export`, which returns a CSV file). All mutating endpoints accept/return `Content-Type: application/json`.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/engineers` | List all engineers |
+| `POST` | `/api/engineers` | Create an engineer — body: `{ iekNumber, name, phone, remarks? }` |
+| `PUT` | `/api/engineers/:id` | Update an engineer — body: any of `{ name, phone, remarks, voted }` |
+| `DELETE` | `/api/engineers/:id` | Delete an engineer |
+| `GET` | `/api/stats` | `{ total, voted, notVoted, turnout }` |
+| `POST` | `/api/reset-votes` | Set every engineer's `voted` back to `false` (history is preserved) |
+| `GET` | `/api/export` | Download all engineers as CSV |
+| `POST` | `/api/seed` | Insert the 8 sample engineers (idempotent, optionally protected by `SEED_SECRET`) |
+| `POST` | `/api/import` | Bulk-add engineers from CSV text — body: `{ csv: "..." }` |
+
+### Bulk CSV import
+
+Use the **Import CSV** button (next to Refresh) to add many engineers in one go instead of one at a time through the form. Expected columns, in order:
+
+```
+iek_number,name,phone,remarks
+IEK009,Eng. Jane Doe,0700000000,Optional note
+IEK010,Eng. John Smith,0700000001,
+```
+
+- A header row is optional — if the first cell is `iek_number` (or similar), it's auto-skipped.
+- `remarks` is optional; the other three columns are required per row.
+- Existing IEK numbers are **skipped, never overwritten** — edit those individually via the table's Edit button instead.
+- Rows missing a required field are skipped and reported back in the toast/response, not silently dropped.
+- **Only `.csv` is supported**, not raw `.xlsx`. If your list is in Excel, use *File → Save As → CSV* first — adding real `.xlsx` binary parsing would mean a new dependency (e.g. `xlsx`/`exceljs`) that nothing else in this project needs; say so if you actually want that added.
+
+Setting `voted: true` via `PUT /api/engineers/:id` inserts a row into `votes` (with `voter_ip`) and logs `VOTE` to `audit_log`. Setting it back to `false` logs `UNDO_VOTE`. Any other field change logs `UPDATE`. Create/delete log `CREATE`/`DELETE`. Resetting logs a single `RESET_ALL`.
 
 ---
 
-## Scaling to Production
+## How to Use the App
 
-To run this system across **multiple devices sharing one live register** (recommended for a real, large-scale election), extend it with:
+1. **Dashboard** — Total Registered, Voted, Not Voted, Turnout % update from the database on every load and after every action.
+2. **Register an engineer** — **➕ Add Engineer** → fill IEK Number, Name, Phone, optional Remarks.
+3. **Search / filter** — search box filters by name/IEK number/phone; **All / Voted / Not Voted** buttons filter by status. Both operate on the last data fetched from the server.
+4. **Mark a vote** — **Mark Voted** → confirm. **Undo** reverts it.
+5. **Remarks** — click **Remarks** to attach/edit a note.
+6. **Edit / Remove** — update or delete an engineer's record.
+7. **Refresh** — re-fetches the latest data from the database (useful if someone else just voted from another device).
+8. **Import CSV** — bulk-add many engineers at once from a `.csv` file (see [Bulk CSV import](#bulk-csv-import) below).
+9. **Export CSV** — downloads the live register via `/api/export`.
+10. **Print** — clean, controls-free printout.
+11. **Reset All Votes** — clears the live "voted" flag for everyone; historical `votes`/`audit_log` rows are kept.
 
-- A backend API (Node/Express, Vercel Functions, etc.) backed by a real database (e.g. Postgres/Redis via the Vercel Marketplace) instead of `localStorage`
-- Voter/staff authentication so only authorized officials can mark votes or edit records
-- An audit log of every status change (timestamp, IEK number, official who made the change)
-- HTTPS (provided automatically by Vercel) and server-side validation for every request
-- Real-time sync across devices (e.g. polling, WebSockets, or Server-Sent Events) so all check-in stations see the same live turnout
+If the API can't reach the database, a red banner appears at the top with a **Retry** button instead of the page silently showing stale or empty data.
 
-The existing `index.html` / `styles.css` / `script.js` can stay largely the same on the front end — `script.js`'s `save()`, `load()`, `markVoted()`, and `undoVote()` functions are the natural integration points to swap `localStorage` calls for `fetch()` calls to a real API.
+---
+
+## Security note (please read)
+
+This build intentionally does **not** include authentication — it wasn't part of the request, and bolting one on unasked would have meant inventing a login flow, session storage, and UI for it. But said plainly: **as shipped, `POST /api/engineers`, `PUT /api/engineers/:id`, `DELETE /api/engineers/:id`, `POST /api/reset-votes`, and `POST /api/import` are open to anyone who can reach your deployment URL**, via `curl` or otherwise — not just through the app's buttons. For a real election with real voters, you should add one of:
+
+- Basic auth or an admin token check in front of the mutating endpoints (quick, but limited).
+- A real auth provider (see Vercel's Marketplace auth integrations — Clerk, Auth0, etc.) gating who can reach the admin UI at all.
+- Network-level restriction (e.g., only expose write access on a private/VPN-only deployment for election-day officials, read-only elsewhere).
+
+Ask if you want this wired in — it's a meaningfully different scope than what was built here (frontend + database + CRUD API), so it wasn't added silently.
+
+---
+
+## Deployment scripts
+
+`DEPLOY.bat` / `deploy.ps1` (unchanged in behavior from before) stage, commit, and push to GitHub, which triggers Vercel's Git integration to redeploy. They do **not** touch your database, run migrations, or seed data — do those manually per the steps above. After pushing, the script reminds you to confirm `DATABASE_URL` is set in Vercel and to seed a fresh database if needed.
 
 ---
 
 ## Browser Support
 
-Latest versions of Chrome, Firefox, Edge, and Safari (desktop and mobile). Requires JavaScript and `localStorage` to be enabled.
+Latest Chrome, Firefox, Edge, and Safari (desktop and mobile). Requires JavaScript.
 
 ---
 

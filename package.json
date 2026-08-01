@@ -1,13 +1,17 @@
 {
   "name": "iek-voting-system",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "IEK Online Voting System — voter turnout tracking for the Institution of Engineers of Kenya. Static single-page app, deployable on Vercel.",
+  "type": "module",
+  "description": "IEK Online Voting System — voter turnout tracking for the Institution of Engineers of Kenya, backed by Neon PostgreSQL and Vercel Functions.",
   "author": "Institution of Engineers of Kenya (IEK)",
   "license": "MIT",
   "scripts": {
-    "dev": "npx --yes serve . -l 3000",
-    "start": "npx --yes serve ."
+    "dev": "vercel dev",
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2"
   },
   "keywords": [
     "iek",
@@ -15,6 +19,8 @@
     "election",
     "kenya",
     "engineers",
-    "static-site"
+    "neon",
+    "postgresql",
+    "vercel"
   ]
 }
