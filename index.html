@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEK Online Voting System</title>
+<meta name="description" content="Institution of Engineers of Kenya — Online Voting &amp; Turnout Tracking System">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Kenyan flag strip -->
+<div class="flag-strip" aria-hidden="true">
+  <span class="stripe black"></span>
+  <span class="stripe white"></span>
+  <span class="stripe red"></span>
+  <span class="stripe white"></span>
+  <span class="stripe green"></span>
+</div>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <div class="brand">
+      <div class="brand-shield">IEK</div>
+      <div class="brand-text">
+        <h1>IEK Online Voting System</h1>
+        <p>Institution of Engineers of Kenya &mdash; Voter Turnout Portal</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="live-badge"><span class="dot"></span> Live Voting</span>
+      <span id="clock" class="clock"></span>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- Statistics Dashboard -->
+  <section class="dashboard" aria-label="Voting statistics">
+    <div class="stat-card stat-black">
+      <div class="stat-icon">&#128101;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statTotal">0</span>
+        <span class="stat-label">Total Registered</span>
+      </div>
+    </div>
+    <div class="stat-card stat-green">
+      <div class="stat-icon">&#9989;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statVoted">0</span>
+        <span class="stat-label">Voted</span>
+      </div>
+    </div>
+    <div class="stat-card stat-red">
+      <div class="stat-icon">&#10060;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statNotVoted">0</span>
+        <span class="stat-label">Not Voted</span>
+      </div>
+    </div>
+    <div class="stat-card stat-white">
+      <div class="stat-icon">&#128200;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statTurnout">0%</span>
+        <span class="stat-label">Voter Turnout</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="turnout-bar-wrap">
+    <div class="turnout-bar-track">
+      <div class="turnout-bar-fill" id="turnoutBarFill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Controls -->
+  <section class="panel controls-panel">
+    <div class="controls-row">
+      <div class="search-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="searchInput" placeholder="Search by name, IEK number or phone...">
+      </div>
+
+      <div class="filter-group" role="group" aria-label="Filter by status">
+        <button class="filter-btn active" data-filter="all" type="button">All</button>
+        <button class="filter-btn" data-filter="voted" type="button">Voted</button>
+        <button class="filter-btn" data-filter="not-voted" type="button">Not Voted</button>
+      </div>
+    </div>
+
+    <div class="controls-row controls-row-actions">
+      <button class="btn btn-primary" id="toggleFormBtn" type="button">
+        <span>&#65291;</span> Add Engineer
+      </button>
+      <button class="btn btn-secondary" id="exportCsvBtn" type="button">
+        <span>&#11015;&#65039;</span> Export CSV
+      </button>
+      <button class="btn btn-secondary" id="printBtn" type="button">
+        <span>&#128424;&#65039;</span> Print
+      </button>
+      <button class="btn btn-danger" id="resetVotesBtn" type="button">
+        <span>&#8635;</span> Reset All Votes
+      </button>
+    </div>
+  </section>
+
+  <!-- Add / Edit Engineer Form -->
+  <section class="panel form-panel" id="formPanel" hidden>
+    <h2 id="formTitle">Register New Engineer</h2>
+    <form id="engineerForm" autocomplete="off">
+      <input type="hidden" id="engineerId" value="">
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="iekNumber">IEK Number *</label>
+          <input type="text" id="iekNumber" required placeholder="e.g. IEK009">
+        </div>
+        <div class="form-field">
+          <label for="fullName">Full Name *</label>
+          <input type="text" id="fullName" required placeholder="e.g. Eng. John Kamau">
+        </div>
+        <div class="form-field">
+          <label for="phone">Phone Number *</label>
+          <input type="tel" id="phone" required placeholder="e.g. 0712345678">
+        </div>
+        <div class="form-field">
+          <label for="remarks">Remarks</label>
+          <input type="text" id="remarks" placeholder="Optional notes">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="formSubmitBtn">Register Engineer</button>
+        <button type="button" class="btn btn-outline" id="cancelFormBtn">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- Engineers Table -->
+  <section class="panel table-panel">
+    <div class="table-panel-header">
+      <h2>Registered Engineers</h2>
+      <span id="resultsCount" class="results-count">0 engineers</span>
+    </div>
+    <div class="table-scroll">
+      <table id="engineersTable">
+        <thead>
+          <tr>
+            <th>IEK Number</th>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Remarks</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+        </tbody>
+      </table>
+    </div>
+    <div id="emptyState" class="empty-state" hidden>
+      <p>&#128203; No engineers found. Try clearing search/filters or add a new engineer.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="flag-strip small" aria-hidden="true">
+      <span class="stripe black"></span>
+      <span class="stripe white"></span>
+      <span class="stripe red"></span>
+      <span class="stripe white"></span>
+      <span class="stripe green"></span>
+    </div>
+    <p>&copy; <span id="year"></span> Institution of Engineers of Kenya (IEK) &mdash; Online Voting System</p>
+    <p class="footer-note">Harambee &middot; Engineering Excellence &middot; Integrity</p>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
