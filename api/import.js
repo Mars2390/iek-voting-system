@@ -28,14 +28,44 @@ function parseCsvLine(line) {
   return cells.map((c) => c.trim());
 }
 
-const KNOWN_HEADER_FIRST_CELLS = ["iek_number", "iek number", "iekno", "iek no", "iek"];
+const FIELD_SYNONYMS = {
+  iek_number: ["iek_number", "iek number", "iekno", "iek no", "iek", "membership no", "membership no.", "membership number"],
+  name: ["name", "full name", "fullname"],
+  phone: ["phone", "phone number", "phone_number", "mobile", "contact", "telephone"],
+  remarks: ["remarks", "notes", "comment", "comments"],
+};
+
+// Try to read the first row as a header naming our fields (in any order,
+// with any of the synonyms above). Returns a { iek_number, name, phone,
+// remarks } -> column index map, or null if it doesn't look like a header
+// for our fields at all.
+function detectHeaderMap(firstRow) {
+  const map = {};
+  firstRow.forEach((rawCell, index) => {
+    const cell = (rawCell || "").trim().toLowerCase();
+    for (const [field, synonyms] of Object.entries(FIELD_SYNONYMS)) {
+      if (synonyms.includes(cell) && !(field in map)) {
+        map[field] = index;
+      }
+    }
+  });
+  return "iek_number" in map && "name" in map ? map : null;
+}
 
 // POST /api/import -> bulk-add engineers from CSV text
-// body: { csv: "IEK009,Eng. Jane Doe,0700000000,optional remarks\n..." }
-// Columns (in order): iek_number, name, phone, remarks (remarks optional).
-// A header row is auto-detected and skipped if its first cell looks like one.
-// Existing IEK numbers are skipped (ON CONFLICT DO NOTHING), never overwritten —
-// use PUT /api/engineers/:id to edit an existing record.
+// body: { csv: "..." }
+//
+// Two accepted shapes:
+//  1. A header row naming the columns (any order, synonyms allowed —
+//     "IEK Number", "Membership No.", "Phone Number", etc. all work),
+//     followed by data rows with that many columns.
+//  2. No recognizable header, in which case the file MUST have exactly
+//     4 columns in the fixed order: iek_number, name, phone, remarks.
+//
+// A file that matches neither shape is REJECTED outright rather than
+// guessed at positionally — silently mapping the wrong column into
+// "phone" once already corrupted real production data, so this endpoint
+// no longer takes that risk.
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -58,10 +88,27 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Too many rows in one import (limit: 2000). Split the file." });
   }
 
-  let rows = lines.map(parseCsvLine);
-  const firstCell = (rows[0][0] || "").toLowerCase();
-  if (KNOWN_HEADER_FIRST_CELLS.includes(firstCell)) {
-    rows = rows.slice(1);
+  const allRows = lines.map(parseCsvLine);
+  const headerMap = detectHeaderMap(allRows[0]);
+  let dataRows = allRows;
+  let getField;
+
+  if (headerMap) {
+    dataRows = allRows.slice(1);
+    getField = (row, field) => (headerMap[field] !== undefined ? (row[headerMap[field]] || "").trim() : "");
+  } else {
+    const columnCount = allRows[0].length;
+    if (columnCount !== 4) {
+      return res.status(400).json({
+        error: `Couldn't recognize this file's columns. It has ${columnCount} column(s) and no header row ` +
+          `naming iek_number/name/phone/remarks. Either add a header row with those column names (in any order), ` +
+          `or format the file as exactly 4 columns: iek_number,name,phone,remarks.`,
+      });
+    }
+    getField = (row, field) => {
+      const index = { iek_number: 0, name: 1, phone: 2, remarks: 3 }[field];
+      return (row[index] || "").trim();
+    };
   }
 
   try {
@@ -70,16 +117,21 @@ export default async function handler(req, res) {
     let skipped = 0;
     const errors = [];
 
-    for (let i = 0; i < rows.length; i++) {
-      const [iekNumber, name, phone, remarks] = rows[i];
-      if (!iekNumber || !name || !phone) {
-        errors.push(`Row ${i + 1}: missing IEK number, name, or phone — skipped.`);
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      const iekNumber = getField(row, "iek_number");
+      const name = getField(row, "name");
+      const phone = getField(row, "phone");
+      const remarks = getField(row, "remarks");
+
+      if (!iekNumber || !name) {
+        errors.push(`Row ${i + 1}: missing IEK number or name — skipped.`);
         continue;
       }
 
       const result = await sql`
         INSERT INTO engineers (iek_number, name, phone, remarks)
-        VALUES (${iekNumber}, ${name}, ${phone}, ${remarks || null})
+        VALUES (${iekNumber}, ${name}, ${phone || null}, ${remarks || null})
         ON CONFLICT (iek_number) DO NOTHING
         RETURNING id
       `;
