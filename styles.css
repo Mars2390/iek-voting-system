@@ -3,6 +3,24 @@
    Theme: Kenyan colors (Black, Red, Green, White)
    ========================================================= */
 
+/* THE FIX for the modal-stacking / "notification won't close" bug:
+   several components below set `display: flex/grid` via a class
+   (.modal-overlay, .notification-dropdown, .export-dropdown,
+   .connection-banner, .bulk-bar) so they can be centered/laid out
+   properly when visible. The browser's built-in rule that makes the
+   `hidden` HTML attribute actually hide an element is a LOW-priority
+   default (`[hidden] { display: none }`) — any author stylesheet class
+   rule setting `display` beats it at equal specificity, since author
+   styles always win over user-agent styles. Net effect: JS was setting
+   `.hidden = true` correctly the entire time, but it did nothing visually
+   for any element with its own `display` override — it stayed fully
+   visible while "hidden" in the DOM's eyes. This single global rule
+   (with !important, so no per-component fix can ever be forgotten again)
+   makes `hidden` always win, for every element in the app. */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   --ke-black: #0a0a0a;
   --ke-red: #bb0a1e;
