@@ -255,29 +255,11 @@ async function main() {
   `;
   ok("confirmed_vote and needs_followup synced.");
 
-  step("Seeding sample engineers");
-  const SAMPLE_ENGINEERS = [
-    ["IEK001", "Eng. James Ochieng", "0712345678"],
-    ["IEK002", "Eng. Mary Wanjiru", "0723456789"],
-    ["IEK003", "Eng. Peter Mwangi", "0734567890"],
-    ["IEK004", "Eng. Sarah Akinyi", "0745678901"],
-    ["IEK005", "Eng. David Odhiambo", "0756789012"],
-    ["IEK006", "Eng. Grace Njeri", "0767890123"],
-    ["IEK007", "Eng. Michael Otieno", "0778901234"],
-    ["IEK008", "Eng. Faith Wambui", "0789012345"],
-  ];
-
-  let inserted = 0;
-  for (const [iekNumber, name, phone] of SAMPLE_ENGINEERS) {
-    const result = await sql`
-      INSERT INTO engineers (iek_number, name, phone)
-      VALUES (${iekNumber}, ${name}, ${phone})
-      ON CONFLICT (iek_number) DO NOTHING
-      RETURNING id
-    `;
-    if (result.length > 0) inserted += 1;
-  }
-  ok(`${inserted} of ${SAMPLE_ENGINEERS.length} engineers seeded! (${SAMPLE_ENGINEERS.length - inserted} already existed)`);
+  // NOTE: this used to auto-seed 8 fake demo engineers (IEK001-IEK008) here
+  // on every run. Removed once the real ~210-voter register was imported —
+  // re-running this on every deploy would have brought the demo rows back
+  // right after they were deliberately deleted. If you ever need throwaway
+  // test data again, add rows by hand through the UI instead.
 
   step("Verifying package.json / vercel.json");
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));

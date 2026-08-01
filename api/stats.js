@@ -18,8 +18,19 @@ export default async function handler(req, res) {
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE voted)::int AS voted,
         COUNT(*) FILTER (WHERE NOT voted)::int AS not_voted,
-        COUNT(*) FILTER (WHERE contact_status = 'follow_up')::int AS needs_follow_up,
-        COUNT(*) FILTER (WHERE contact_status = 'not_contacted')::int AS not_contacted
+        COUNT(*) FILTER (WHERE contact_status = 'pending')::int AS not_contacted,
+        -- Same live formula as api/reports.js (?type=urgent) and api/engineers.js —
+        -- kept in sync deliberately so the dashboard card, the Analytics section,
+        -- and the Urgent list always agree on this number.
+        COUNT(*) FILTER (
+          WHERE NOT voted AND contact_status <> 'confirmed' AND (
+            call_count >= 3
+            OR contact_status IN ('follow_up', 'no_answer', 'not_reachable')
+            OR NOT EXISTS (
+              SELECT 1 FROM remarks r WHERE r.engineer_id = engineers.id AND r.created_at > NOW() - INTERVAL '2 days'
+            )
+          )
+        )::int AS needs_follow_up
       FROM engineers
     `;
 

@@ -57,10 +57,9 @@ IEK-VOTING-FULL/
 │   ├── meta.js                # Audit log + election status via ?type=audit|status — /api/audit-log, /api/election-status
 │   ├── stats.js               # GET — total/voted/notVoted/turnout/needsFollowUp
 │   ├── reset-votes.js         # POST — reset all engineers to "not voted"
-│   ├── export.js              # GET — CSV download, ?type=engineers|stats|candidates|calls|remarks
-│   ├── seed.js                # POST — insert the 8 sample engineers
+│   ├── export.js              # GET — CSV/Excel download, ?type=engineers|stats|candidates|calls|remarks
 │   └── import.js              # POST — bulk-add engineers from CSV text
-├── setup.js                  # One-command bootstrap: tables + seed + git push + deploy
+├── setup.js                  # One-command bootstrap: tables + sync + git push + deploy
 ├── fix-database.js           # Cleanup + clean re-import (see git history for context)
 ├── .env.example             # Template for required env vars (committed)
 ├── .env.local                # Your real local DATABASE_URL (gitignored)
@@ -88,7 +87,7 @@ Currently **10** (2 under the limit). The pattern used to consolidate here — o
 
 ## Quickest path: `node setup.js`
 
-If `.env.local` already has your real Neon `DATABASE_URL` in it, one command does steps 3–8 below in order: installs dependencies, connects to Neon, creates tables, seeds the 8 sample engineers, verifies `package.json`/`vercel.json`, then commits and pushes to GitHub (which triggers Vercel's auto-deploy), with a best-effort `vercel --prod` if the Vercel CLI is installed and logged in.
+If `.env.local` already has your real Neon `DATABASE_URL` in it, one command does steps 3–8 below in order: installs dependencies, connects to Neon, creates/syncs tables, verifies `package.json`/`vercel.json`, then commits and pushes to GitHub (which triggers Vercel's auto-deploy), with a best-effort `vercel --prod` if the Vercel CLI is installed and logged in. It does **not** insert any placeholder data — see [Load your real voter register](#load-your-real-voter-register) below for that.
 
 ```bash
 node setup.js
@@ -155,8 +154,7 @@ CREATE TABLE audit_log (
 ### Production (Vercel)
 1. Go to your Vercel project → **Settings → Environment Variables**.
 2. Add `DATABASE_URL` with the same Neon connection string, scoped to **Production** (and Preview, if you want preview deployments to hit the same database — or create a second Neon branch/database for previews).
-3. Optionally add `SEED_SECRET` (any random string) to lock down `POST /api/seed` — see [Security note](#security-note-please-read).
-4. Redeploy (or push a commit) after adding env vars — Vercel Functions only pick up new env vars on a fresh deployment.
+3. Redeploy (or push a commit) after adding env vars — Vercel Functions only pick up new env vars on a fresh deployment.
 
 You can also sync env vars with the Vercel CLI:
 ```bash
@@ -189,35 +187,15 @@ If you actually want a unified Express server (e.g. to run this outside Vercel t
 
 ---
 
-## 4. Seed the sample data
+## 4. Load your real voter register
 
-Once your schema is created and `DATABASE_URL` is set, seed the 8 sample engineers:
+There is no demo/sample data seeding step — it was deliberately removed once the real register was imported (an earlier version of this app auto-seeded 8 placeholder engineers named IEK001–IEK008 on every `node setup.js` run, which meant deleting them from production only for them to reappear on the next deploy; that seeding code no longer exists at all).
 
-```bash
-# Local (vercel dev running on port 3000)
-curl -X POST http://localhost:3000/api/seed
+To load your actual voters:
+- **One at a time**: click **+ Add Engineer** in the app.
+- **In bulk**: click **Import CSV** and select your voter register file — see [Bulk CSV import](#bulk-csv-import) below for the expected format. `data/iek-voter-register-import.csv` in this repo (gitignored — it's real people's data, never committed) is the cleaned register already used for this election.
 
-# Production
-curl -X POST https://your-project.vercel.app/api/seed
-```
-
-If you set `SEED_SECRET`, include it:
-```bash
-curl -X POST https://your-project.vercel.app/api/seed -H "x-seed-key: your-secret-here"
-```
-
-Seeding is idempotent — engineers with an already-existing IEK number are skipped, so it's safe to call more than once.
-
-| IEK Number | Name | Phone |
-|---|---|---|
-| IEK001 | Eng. James Ochieng | 0712345678 |
-| IEK002 | Eng. Mary Wanjiru | 0723456789 |
-| IEK003 | Eng. Peter Mwangi | 0734567890 |
-| IEK004 | Eng. Sarah Akinyi | 0745678901 |
-| IEK005 | Eng. David Odhiambo | 0756789012 |
-| IEK006 | Eng. Grace Njeri | 0767890123 |
-| IEK007 | Eng. Michael Otieno | 0778901234 |
-| IEK008 | Eng. Faith Wambui | 0789012345 |
+If you ever want throwaway test rows while developing, add them by hand through the UI and delete them when done — don't reintroduce an automated seeding step, since it's exactly the kind of thing that quietly ends up live in front of real voters if forgotten.
 
 ---
 
@@ -246,7 +224,6 @@ All endpoints return JSON (except `/api/export`, which returns a CSV or Excel fi
 | `GET` | `/api/stats` | `{ total, voted, notVoted, turnout, needsFollowUp, notContacted }` |
 | `POST` | `/api/reset-votes` | Set every engineer's `voted` back to `false` (history is preserved) |
 | `GET` | `/api/export?type=X&format=Y` | Download a report — `type` is `engineers` (default), `stats`, `candidates`, `calls`, or `remarks`; `format` is `csv` (default) or `excel` |
-| `POST` | `/api/seed` | Insert the 8 sample engineers (idempotent, optionally protected by `SEED_SECRET`) |
 | `POST` | `/api/import` | Bulk-add engineers from CSV text — body: `{ csv: "..." }` |
 | `GET` | `/api/election-status` | `{ phase, startsAt, endsAt, serverTime, testMode }` — `phase` is `before` \| `live` \| `closed` |
 | `GET` | `/api/audit-log` | Most recent 200 audit trail entries (read-only) |
@@ -430,7 +407,7 @@ A few more specifics for election day:
 
 ## Deployment scripts
 
-`DEPLOY.bat` / `deploy.ps1` (unchanged in behavior from before) stage, commit, and push to GitHub, which triggers Vercel's Git integration to redeploy. They do **not** touch your database, run migrations, or seed data — do those manually per the steps above. After pushing, the script reminds you to confirm `DATABASE_URL` is set in Vercel and to seed a fresh database if needed.
+`DEPLOY.bat` / `deploy.ps1` (unchanged in behavior from before) stage, commit, and push to GitHub, which triggers Vercel's Git integration to redeploy. They do **not** touch your database or run migrations — `node setup.js` does that. After pushing, the script reminds you to confirm `DATABASE_URL` is set in Vercel.
 
 ---
 
