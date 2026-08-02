@@ -1,11 +1,11 @@
 // Shared election-window configuration.
 // Filename is prefixed with "_" so Vercel excludes it from routing.
 
-// Was midnight — changed to 8:00 AM to match what's actually communicated
-// to voters (the Sozuri SMS templates all say "voting starts Monday 8AM
-// at IEK Headquarters"). The vote button unlocking at midnight while SMS
-// promised 8AM was a real bug, not just a display mismatch.
-export const VOTING_START = new Date("2026-08-03T08:00:00+03:00"); // Mon Aug 3 2026, 8:00 AM EAT
+// Official IEK election start time, confirmed 2026-08-02 against the
+// real IEK notice ("voting starts in 14h49m" at 12:12 UTC == 6:00 AM EAT
+// Monday, checked to the minute). Earlier values (midnight, then 8 AM)
+// were both wrong — this is the one that matches the official notice.
+export const VOTING_START = new Date("2026-08-03T06:00:00+03:00"); // Mon Aug 3 2026, 6:00 AM EAT
 export const VOTING_END = new Date("2026-08-03T17:00:00+03:00");   // Mon Aug 3 2026, 5:00 PM EAT
 
 // Temporary escape hatch so the voting flow can be tested end-to-end
