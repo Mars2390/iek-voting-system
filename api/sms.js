@@ -2,19 +2,30 @@ import { getSql } from "./_db.js";
 import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 
 // =========================================================
-// SOZURI API CONTRACT — verified against https://sozuri.net/docs/text and
-// https://sozuri.net/docs/authentication, and confirmed with a live
-// auth-only test call (2026-08-02).
+// SOZURI API CONTRACT — this now matches the exact cURL example shown on
+// this project's own "API Credentials" dashboard page (the authoritative
+// source — more specific than the general public docs used earlier).
 //
 // POST https://sozuri.net/api/v1/messaging
-// Headers: Authorization: Bearer <API_KEY>, Content-Type: application/json
-// Body:    { project, from, to, message, type: "transactional"|"promotional" }
+// Headers: Content-Type: application/json, Accept: application/json
+//          (NO Authorization header — apiKey travels in the body instead)
+// Body:    { project, apiKey, from, to, message, channel: "sms", type }
 // Success: { messageData: { messages: N }, recipients: [{ messageId, to, status, statusCode, ... }] }
 // Error:   { messageData: { message: "..." } }  -or-  { error_code, message, retryable }
 //
 // CONFIRMED: SOZURI_PROJECT_ID must be the project's dashboard DISPLAY
 // NAME ("IEK ELECTION"), not the opaque project ID string — using the ID
 // produced 401 AUTHENTICATION_FAILED; the name authenticates correctly.
+// (A Bearer-header variant also authenticated in earlier testing, but the
+// dashboard's own example is the one to trust going forward.)
+//
+// type: "promotional" — the one message that was confirmed "Delivered"
+// on the dashboard (not just "Accepted") used this type. It comes with a
+// carrier-mandated opt-out suffix appended to the text automatically
+// (e.g. "...STOP*456*9*5#") — a Kenyan regulatory requirement for bulk/
+// marketing SMS, not a bug. If a "transactional" route gets separately
+// approved on the account later, flipping this constant is the only
+// change needed.
 //
 // ⚠️ GOTCHA: Sozuri returns HTTP 200 even for request-level errors (e.g.
 // a bad/missing recipient), with the real error in `messageData.message`
@@ -22,6 +33,7 @@ import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 // see the `recipients` presence check below.
 // =========================================================
 const SOZURI_ENDPOINT = "https://sozuri.net/api/v1/messaging";
+const SOZURI_MESSAGE_TYPE = "promotional";
 
 // Converts Kenyan numbers to the bare-digit format requested (254712345678,
 // no "+"). Handles the mixed formats already present in the voter register
@@ -51,24 +63,28 @@ async function sendViaSozuri(phone, message) {
 
   const requestBody = {
     project: projectId,
+    apiKey,
     from: sender || undefined,
     to: phone,
     message,
-    type: "transactional",
+    channel: "sms",
+    type: SOZURI_MESSAGE_TYPE,
   };
-  const debugRequest = { url: SOZURI_ENDPOINT, headers: { Authorization: "Bearer [redacted]", "Content-Type": "application/json" }, body: requestBody };
+  // Redacted copy for logs/debug responses — never expose the real key.
+  const redactedBody = { ...requestBody, apiKey: "[redacted]" };
+  const debugRequest = { url: SOZURI_ENDPOINT, headers: { "Content-Type": "application/json", Accept: "application/json" }, body: redactedBody };
 
   // Visible in `vercel logs` / the Vercel dashboard function logs — never
   // logs the API key itself.
-  console.log("[sozuri] request:", JSON.stringify(requestBody));
+  console.log("[sozuri] request:", JSON.stringify(redactedBody));
 
   let response;
   try {
     response = await fetch(SOZURI_ENDPOINT, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
       body: JSON.stringify(requestBody),
     });
