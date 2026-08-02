@@ -2,21 +2,28 @@ import { getSql } from "./_db.js";
 import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 
 // =========================================================
-// ⚠️ SOZURI API CONTRACT — UNVERIFIED, READ THIS FIRST
+// SOZURI API CONTRACT — verified against https://sozuri.net/docs/text and
+// https://sozuri.net/docs/authentication (fetched 2026-08-02).
 //
-// I do not have confirmed, current documentation for Sozuri's exact API
-// endpoint/payload shape. Everything below (SOZURI_ENDPOINT, the request
-// body shape, and how a successful/failed response is detected) is a
-// best-effort implementation, not a verified-against-their-docs one.
+// POST https://sozuri.net/api/v1/messaging
+// Headers: Authorization: Bearer <API_KEY>, Content-Type: application/json
+// Body:    { project, from, to, message, type: "transactional"|"promotional" }
+// Success: { messageData: { messages: N }, recipients: [{ messageId, to, status, statusCode, ... }] }
+// Error:   { messageData: { message: "..." } }  -or-  { error_code, message, retryable }
 //
-// Before any bulk send to real voters: send ONE test SMS to your own
-// phone first (select just one engineer in the UI). If it fails, the
-// error message returned will include Sozuri's raw response — compare
-// that against whatever request format you already confirmed works, and
-// adjust ONLY the sendViaSozuri() function below. Everything else in this
-// file (logging, phone normalization, drafts) is provider-independent.
+// ⚠️ KNOWN ISSUE as of this writing: a live test call with the configured
+// SOZURI_PROJECT_ID/SOZURI_API_KEY returned HTTP 401 AUTHENTICATION_FAILED
+// from Sozuri directly (verified via curl, independent of this app's code).
+// Two things to check on the Sozuri dashboard before this will work:
+//   1. Sozuri's docs say the "project" field wants the project's *display
+//      name*, not its ID — SOZURI_PROJECT_ID may need to hold that name
+//      instead of the ID string originally provided.
+//   2. Confirm the API key hasn't been regenerated/revoked since it was
+//      copied, and that the account is verified/active for sending.
+// Once corrected, no code change should be needed — this file already
+// matches the documented contract.
 // =========================================================
-const SOZURI_ENDPOINT = "https://msg.sozuri.net/api/v1/messaging";
+const SOZURI_ENDPOINT = "https://sozuri.net/api/v1/messaging";
 
 // Converts Kenyan numbers to the bare-digit format requested (254712345678,
 // no "+"). Handles the mixed formats already present in the voter register
@@ -51,10 +58,11 @@ async function sendViaSozuri(phone, message) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        project_id: projectId,
-        sender_id: sender || undefined,
-        recipient: phone,
+        project: projectId,
+        from: sender || undefined,
+        to: phone,
         message,
+        type: "transactional",
       }),
     });
   } catch (networkErr) {
@@ -63,7 +71,7 @@ async function sendViaSozuri(phone, message) {
 
   const body = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(body?.message || body?.error || `Sozuri returned HTTP ${response.status}`);
+    throw new Error(body?.messageData?.message || body?.message || `Sozuri returned HTTP ${response.status}`);
   }
 
   return body;
@@ -137,22 +145,12 @@ export default async function handler(req, res) {
         res.setHeader("Allow", "GET, OPTIONS");
         return res.status(405).json({ error: `Method ${req.method} not allowed.` });
       }
-      if (!process.env.SOZURI_PROJECT_ID || !process.env.SOZURI_API_KEY) {
-        return res.status(200).json({ balance: null, error: "SMS not configured." });
-      }
-      // Best-effort — Sozuri's balance/account endpoint path is unverified
-      // (same caveat as sendViaSozuri above). Fails gracefully: the UI
-      // shows "—" instead of a number rather than breaking anything.
-      try {
-        const response = await fetch("https://msg.sozuri.net/api/v1/account/balance", {
-          headers: { Authorization: `Bearer ${process.env.SOZURI_API_KEY}` },
-        });
-        const body = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(body?.message || `HTTP ${response.status}`);
-        return res.status(200).json({ balance: body?.balance ?? body?.credits ?? null, raw: body });
-      } catch (err) {
-        return res.status(200).json({ balance: null, error: err.message });
-      }
+      // Sozuri's public API (https://sozuri.net/docs) has no documented
+      // balance/credits endpoint — "each project gets its own ... credit
+      // balance" per their getting-started guide, but it's dashboard-only,
+      // not exposed over the API. Rather than fake a number, say so
+      // honestly; the UI shows this text instead of a live figure.
+      return res.status(200).json({ balance: null, error: "Sozuri has no API for this — check your balance on sozuri.net dashboard." });
     }
 
     if (req.method === "GET") {
@@ -208,9 +206,10 @@ export default async function handler(req, res) {
 
       try {
         const result = await sendViaSozuri(normalizedPhone, trimmedMessage);
+        const recipient = result?.recipients?.[0];
         const [row] = await sql`
           INSERT INTO sms_log (engineer_id, phone, message, status, provider_status, provider_message_id, sent_by)
-          VALUES (${eid}, ${normalizedPhone}, ${trimmedMessage}, 'sent', ${JSON.stringify(result).slice(0, 45)}, ${result?.id || result?.message_id || null}, ${trimmedSentBy})
+          VALUES (${eid}, ${normalizedPhone}, ${trimmedMessage}, 'sent', ${recipient?.status || "accepted"}, ${recipient?.messageId || null}, ${trimmedSentBy})
           RETURNING id
         `;
         await logAudit(sql, "SMS_SENT", eid, getClientIp(req));

@@ -83,7 +83,7 @@ This project hit that limit directly: adding 4 new endpoints in one pass (16 tot
 find api -maxdepth 1 -name "*.js" | grep -v "/_" | wc -l
 ```
 
-Currently **11** (1 under the limit). The pattern used to consolidate here — one file per *resource*, dispatching on `req.query.id` for single-item ops and a `?type=`/`?kind=` marker for otherwise-unrelated GET reports, with `vercel.json` rewrites keeping the original URLs intact — is the way to add more without hitting this again. `api/sms.js` alone covers send/log/drafts/replies/balance this way rather than becoming 5 separate files. `api/sms-reply.js` stayed a separate file since it's an inbound webhook with a different caller (Sozuri, not the browser) and a different auth shape — folding it into `sms.js` would have made that file's dispatch logic harder to follow for no function-count benefit (still 11 either way). If you outgrow 12 functions even with consolidation, upgrading to a paid Vercel plan removes the limit.
+Currently **11** (1 under the limit). The pattern used to consolidate here — one file per *resource*, dispatching on `req.query.id` for single-item ops and a `?type=`/`?kind=` marker for otherwise-unrelated GET reports, with `vercel.json` rewrites keeping the original URLs intact — is the way to add more without hitting this again. `api/sms.js` alone covers send/log/drafts/replies/balance this way rather than becoming 5 separate files. `api/sms-reply.js` stayed a separate file from `sms.js` since it's a webhook with a different caller (Sozuri, not the browser) and a different auth shape — but it does double duty internally, also handling the delivery-status webhook (`/api/sms-status` rewrites to `/api/sms-reply?kind=status`) rather than becoming a 12th file. If you outgrow 12 functions even with consolidation, upgrading to a paid Vercel plan removes the limit.
 
 ---
 
@@ -217,20 +217,27 @@ Vercel auto-detects the `/api` folder as Functions; no build step is required fo
 
 Not a Vercel Marketplace integration — I checked (`vercel integration discover --category messaging`) and the only native SMS/messaging product listed is Resend, which is email-only. SMS here is a direct integration with **Sozuri**, wired up the same way `DATABASE_URL` is: credentials read from environment variables, no SDK, just `fetch()` to their REST API.
 
-**⚠️ Unverified API contract.** I do not have confirmed, current documentation for Sozuri's exact endpoint URL, request body shape, or response shape — `api/sms.js` (`sendViaSozuri()`) and the `?kind=balance` handler are a best-effort implementation, clearly flagged in code comments. **Before sending to real voters: select just one engineer (ideally your own phone number) and send one test message first.** If it fails, the returned error includes Sozuri's raw response — use that to adjust `sendViaSozuri()`; everything else in the file (logging, phone normalization, drafts, replies) doesn't depend on the exact contract and needs no changes.
+**The request/response contract in `api/sms.js` is verified** against Sozuri's official docs (`sozuri.net/docs/text`, `/docs/authentication`, `/docs/webhooks`, `/docs/2way`) — endpoint, headers, body fields, and both success/error response shapes all match what's documented.
+
+**⚠️ Known blocker as of this writing:** a live test call using the configured credentials returned `401 AUTHENTICATION_FAILED` directly from Sozuri (confirmed via `curl`, independent of any code in this app — so this isn't a bug to fix here). Two things to check on your Sozuri dashboard before sending will work:
+1. Sozuri's docs say the `project` field in the request body wants the project's **display name**, not its ID — `SOZURI_PROJECT_ID` may need to hold that name instead.
+2. Confirm the API key hasn't been regenerated/revoked since it was first copied, and that the account is verified/active for sending (not just created).
+
+**Before sending to real voters, regardless: select just one engineer (ideally your own phone) and send one test message first.**
 
 ### Setup
 
-1. Sign up at Sozuri (https://sozuri.net) and grab your **Project ID** and **API Key** from the dashboard.
+1. Sign up at Sozuri (https://sozuri.net) and grab your **Project** identifier (try the display name shown on your dashboard, not just the ID — see the blocker above) and **API Key**.
 2. Add to `.env.local` (local) and Vercel → Settings → Environment Variables (production):
    ```
-   SOZURI_PROJECT_ID=your-project-id
+   SOZURI_PROJECT_ID=your-project-name-or-id
    SOZURI_API_KEY=your-api-key
    SOZURI_SENDER=STARIKO
+   SOZURI_CALLBACK_KEY=          # optional, see "Two-way SMS" below
    ```
    `SOZURI_SENDER` is the alphanumeric sender ID recipients see. Most SMS gateways cap this at **11 characters** (the GSM alphanumeric sender ID limit) — that's why this project uses `STARIKO` rather than the longer `IEKVOTESTARIKOO`.
 3. Run `node setup.js` to create the `sms_log`, `sms_drafts`, and `sms_replies` tables, then deploy.
-4. Send one test SMS to your own number from the **SMS Draft Center** section before any bulk send (see the unverified-contract warning above).
+4. Send one test SMS to your own number from the **SMS Draft Center** section before any bulk send.
 
 ### How it works — SMS Draft Center
 
@@ -241,17 +248,23 @@ Everything SMS-related lives in one section (**📱 SMS Center** in the nav bar)
 - **Recipients**: a scrollable checklist of every engineer (name + phone), with quick-select buttons — **Select All**, **Select Not Voted**, **Select Confirmed**, **Select Not Reachable**, **Clear All** — plus voter-status/call-status filters and a search box to narrow the list before selecting. Engineers with no phone on file are shown disabled (can't be selected). Clicking **📱 SMS** on a row in the main table, or **📱 SMS Selected** in the bulk-action bar, jumps here with just those engineers pre-selected.
 - **Sending**: **📤 Send to Selected** sends one request per recipient (not one bulk-array call) — this is deliberate, since it's what makes per-recipient `[Name]` personalization possible and drives the live "Sending: X/Y" progress bar. Up to 3 sends run concurrently. A result summary (✅ sent / ❌ failed / ⚠️ no usable phone) appears when it finishes.
 - **Phone normalization**: your voter register has mixed formats (`"0703-142385"`, `"0712345678"`, etc.) — `toSozuriMsisdn()` in `api/sms.js` normalizes every number to bare-digit `254...` form (no `+`, per Sozuri's expected format) before sending. Numbers it can't confidently parse are logged as `invalid_phone` and skipped rather than guessed at.
-- **SMS Log**: every send attempt (sent/failed/invalid_phone) is logged inline at the bottom of the section, and per-engineer in the **Details** modal's history timeline alongside calls and remarks.
-- **Credits**: the **💰 Credits** badge at the top of the section calls `?kind=balance`, a best-effort account-balance lookup (see the unverified-contract warning — if Sozuri's balance endpoint path turns out to differ, this shows "—" instead of breaking anything else).
+- **SMS Log**: every send attempt (sent/failed/invalid_phone) is logged inline at the bottom of the section, and per-engineer in the **Details** modal's history timeline alongside calls and remarks. Delivery-status callbacks (see below) update the same rows once Sozuri reports what actually happened downstream.
+- **Credits**: Sozuri has **no API endpoint for account balance/credits** (confirmed against their docs — "each project gets its own ... credit balance" but it's dashboard-only). The **💰 Credits** badge says so plainly rather than faking a number — check the actual balance on your Sozuri dashboard.
 
-### Two-way SMS (replies)
+### Two-way SMS (replies + delivery status)
 
-`api/sms-reply.js` is a webhook endpoint — point Sozuri's inbound-SMS/webhook setting (check their dashboard for the exact field) at `https://<your-domain>/api/sms-reply`. When someone replies:
+Two separate webhooks, both handled by `api/sms-reply.js` (one file, `?kind=` dispatch — same consolidation pattern as `api/sms.js`, see [Serverless function count](#serverless-function-count-vercel-hobby-plan-limit-12)):
 
-- The raw reply is always logged to `sms_replies`, matched to an engineer by phone number if possible (last 9 digits, tolerant of format differences).
-- If the reply contains **YES** or **VOTE** (case-insensitive) and that engineer isn't already `confirmed`, it auto-logs a `contact_calls` row (caller: "SMS Reply (Auto)") and updates `contact_status` to `confirmed` — exactly like a real call would, so it shows up in Analytics/Urgent/Agenda automatically.
-- **💬 View Replies** in the SMS Log area shows the raw inbox, including unmatched numbers and which replies triggered an auto-confirm.
-- Like the send path, the exact inbound payload shape Sozuri POSTs is unverified — `extractPhoneAndMessage()` in `api/sms-reply.js` tries several plausible field names. If replies aren't appearing after you configure the webhook, that function is the one to adjust.
+| Set this in Sozuri dashboard → Manage API → Callback URLs | Points to |
+|---|---|
+| Inbound / 2-way SMS webhook | `https://<your-domain>/api/sms-reply` |
+| Delivery status / callback URL | `https://<your-domain>/api/sms-status` |
+
+**Inbound replies**: every reply is logged to `sms_replies`, matched to an engineer by phone (last 9 digits, tolerant of format differences). If the reply contains **YES** or **VOTE** (case-insensitive) and that engineer isn't already `confirmed`, it auto-logs a `contact_calls` row (caller: "SMS Reply (Auto)") and sets `contact_status = 'confirmed'` — exactly like a real call would, so it shows up in Analytics/Urgent/Agenda automatically. **💬 View Replies** in the SMS Log area shows the raw inbox, including unmatched numbers and which replies triggered an auto-confirm.
+
+**Delivery status**: Sozuri POSTs `{ messageId, status, network, ... }` asynchronously as each message progresses past the initial "accepted" response. The matching `sms_log` row (by `provider_message_id`) gets its `status`/`provider_status` updated — `"success"` maps to `sent`, anything else (`network_failure`, `delivery_impossible`, `absent_subscriber`, `unknown_error`) maps to `failed`.
+
+**Optional verification**: register an **Auth Key** under Sozuri dashboard → Manage API → Callback URLs, then set `SOZURI_CALLBACK_KEY` to the same value — both webhooks then reject any callback whose `authKey` field doesn't match. Left unenforced if you don't set it, so this works before you've configured that.
 
 ### Cost (verify current pricing yourself — this is not live data)
 
@@ -277,8 +290,9 @@ All endpoints return JSON (except `/api/export`, which returns a CSV or Excel fi
 | `POST` | `/api/sms` | Send ONE personalized SMS — body: `{ engineerId, message, sentBy }` — see [SMS Draft Center](#6-sms-draft-center-optional) |
 | `GET`/`POST`/`DELETE` | `/api/sms?kind=drafts[&id=X]` | List / save / delete saved message drafts |
 | `GET` | `/api/sms?kind=replies` | Most recent 100 inbound SMS replies |
-| `GET` | `/api/sms?kind=balance` | Best-effort Sozuri account balance (unverified contract, fails gracefully) |
-| `POST` | `/api/sms-reply` | Inbound webhook — point Sozuri's reply/webhook setting here, not called by the browser |
+| `GET` | `/api/sms?kind=balance` | Always returns `{ balance: null }` — Sozuri has no API for this, check their dashboard |
+| `POST` | `/api/sms-reply` | Inbound 2-way SMS webhook — point Sozuri's callback setting here, not called by the browser |
+| `POST` | `/api/sms-status` | Delivery-status webhook (rewrites to `/api/sms-reply?kind=status`) — likewise Sozuri-only |
 | `GET` | `/api/election-status` | `{ phase, startsAt, endsAt, serverTime, testMode }` — `phase` is `before` \| `live` \| `closed` |
 | `GET` | `/api/audit-log` | Most recent 200 audit trail entries (read-only) |
 | `GET` | `/api/candidates` | List all candidates (grouped by position, sorted by votes) |

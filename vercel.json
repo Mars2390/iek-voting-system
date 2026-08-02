@@ -13,6 +13,7 @@
     { "source": "/api/analytics", "destination": "/api/reports?type=analytics" },
     { "source": "/api/audit-log", "destination": "/api/meta?type=audit" },
     { "source": "/api/election-status", "destination": "/api/meta?type=status" },
+    { "source": "/api/sms-status", "destination": "/api/sms-reply?kind=status" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

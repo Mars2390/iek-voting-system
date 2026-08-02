@@ -2,26 +2,43 @@ import { getSql } from "./_db.js";
 import { applyCors, logAudit, sendError } from "./_utils.js";
 
 // =========================================================
-// ⚠️ INBOUND WEBHOOK — PAYLOAD SHAPE IS UNVERIFIED
+// SOZURI WEBHOOKS — verified against https://sozuri.net/docs/2way and
+// https://sozuri.net/docs/webhooks (fetched 2026-08-02).
 //
-// Point Sozuri's inbound-SMS / delivery-callback webhook at:
-//   https://<your-domain>/api/sms-reply
-// (check the Sozuri dashboard for where to configure this — the exact
-// setting name/location isn't something I have confirmed docs for).
+// This one file handles BOTH webhooks Sozuri needs, dispatched by
+// ?kind= (see vercel.json rewrites, same pattern as api/sms.js):
 //
-// I don't have a confirmed payload shape for what Sozuri POSTs on an
-// inbound reply, so extractPhoneAndMessage() below reads every field
-// name it plausibly could be. If replies aren't showing up after you
-// wire the webhook, log req.body (temporarily) and adjust the field
-// list — everything else in this file (matching, auto-confirm, logging)
-// is provider-independent.
+//   Inbound 2-way SMS  -> /api/sms-reply           (no ?kind=, default)
+//     { project, number, shortcode, message, messageId, channel,
+//       status, network, type, timestamp, authKey? }
+//
+//   Delivery status     -> /api/sms-status -> ?kind=status
+//     { project, messageId, channel, status, network, type,
+//       timestamp, authKey? }
+//     status values include "success", "network_failure",
+//     "delivery_impossible", "absent_subscriber", "unknown_error".
+//
+// Optional verification: set SOZURI_CALLBACK_KEY to whatever "Auth Key"
+// you register under Sozuri dashboard -> Manage API -> Callback URLs,
+// and every callback's `authKey` field is checked against it. Left
+// unenforced if the env var isn't set, so this works before you've
+// configured that.
 // =========================================================
 
 const CONFIRM_KEYWORDS = ["YES", "VOTE"];
+const FAILED_DELIVERY_STATUSES = new Set(["network_failure", "delivery_impossible", "absent_subscriber", "unknown_error"]);
+
+function callbackIsAuthentic(body) {
+  const expected = process.env.SOZURI_CALLBACK_KEY;
+  if (!expected) return true; // not configured — accept (documented in README)
+  return body && body.authKey === expected;
+}
 
 function extractPhoneAndMessage(body) {
   const b = body || {};
-  const phone = b.from || b.sender || b.msisdn || b.phone || b.source || b.recipient || null;
+  // "number" is Sozuri's confirmed field name for the inbound sender's
+  // phone; the others are defensive fallbacks in case that ever changes.
+  const phone = b.number || b.from || b.sender || b.msisdn || b.phone || null;
   const message = b.message || b.text || b.content || b.body || "";
   return { phone: phone ? String(phone) : null, message: String(message || "") };
 }
@@ -37,7 +54,10 @@ function normalizePhone(rawPhone) {
   return digits || null;
 }
 
-// POST /api/sms-reply — inbound SMS webhook (Sozuri calls this, not the browser)
+// POST /api/sms-reply             -> inbound 2-way SMS webhook
+// POST /api/sms-reply?kind=status -> delivery-status webhook (rewritten
+//                                     from /api/sms-status, see vercel.json)
+// Both are called by Sozuri, never by the browser.
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -47,8 +67,27 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: `Method ${req.method} not allowed.` });
   }
 
+  if (!callbackIsAuthentic(req.body)) {
+    return res.status(401).json({ error: "Invalid or missing authKey." });
+  }
+
   try {
     const sql = getSql();
+
+    if (req.query.kind === "status") {
+      const { messageId, status } = req.body || {};
+      if (!messageId) return res.status(200).json({ updated: false, error: "No messageId in payload." });
+
+      const normalizedStatus = FAILED_DELIVERY_STATUSES.has(status) ? "failed" : "sent";
+      const result = await sql`
+        UPDATE sms_log
+        SET status = ${normalizedStatus}, provider_status = ${status || null}
+        WHERE provider_message_id = ${messageId}
+        RETURNING id
+      `;
+      return res.status(200).json({ updated: result.length > 0, messageId, status });
+    }
+
     const { phone: rawPhone, message } = extractPhoneAndMessage(req.body);
     const normalizedPhone = normalizePhone(rawPhone);
 

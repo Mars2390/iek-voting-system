@@ -1294,14 +1294,9 @@
   }
 
   async function loadSmsCredits() {
-    try {
-      const data = await apiFetch("/api/sms?kind=balance");
-      el.smsCreditBadge.textContent = typeof data.balance === "number"
-        ? `\u{1F4B0} Credits: ${data.balance}`
-        : "\u{1F4B0} Credits: —";
-    } catch (err) {
-      el.smsCreditBadge.textContent = "\u{1F4B0} Credits: —";
-    }
+    // Sozuri has no API for this — see api/sms.js ?kind=balance. Shown as
+    // a fixed link-out instead of a live number.
+    el.smsCreditBadge.textContent = "\u{1F4B0} Credits: check Sozuri dashboard";
   }
 
   async function toggleSmsReplies() {
