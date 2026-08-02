@@ -1224,6 +1224,7 @@
 
     const total = recipients.length;
     let sent = 0, failed = 0, invalidPhone = 0;
+    let lastFailure = null; // { error, debugRequest, debugResponse } — shown below so failures are debuggable without server log access
     el.smsProgressText.textContent = `Sending: 0/${total}`;
 
     // Limited concurrency, not one giant batch request — this is what
@@ -1242,9 +1243,10 @@
           });
           if (result.status === "sent") sent++;
           else if (result.status === "invalid_phone") invalidPhone++;
-          else failed++;
+          else { failed++; lastFailure = result; }
         } catch (err) {
           failed++;
+          lastFailure = { error: err.message };
         }
         const done = sent + failed + invalidPhone;
         el.smsProgressText.textContent = `Sending: ${done}/${total}`;
@@ -1260,7 +1262,12 @@
     const parts = [`&#9989; Sent: ${sent}`];
     if (failed) parts.push(`&#10060; Failed: ${failed}`);
     if (invalidPhone) parts.push(`&#9888;&#65039; No usable phone: ${invalidPhone}`);
-    el.smsSendResult.innerHTML = parts.join(" &nbsp; ");
+    let resultHtml = parts.join(" &nbsp; ");
+    if (lastFailure) {
+      const debugPayload = { error: lastFailure.error, request: lastFailure.debugRequest, response: lastFailure.debugResponse };
+      resultHtml += `<details class="sms-debug"><summary>Show last error detail (for debugging)</summary><pre>${escapeHtml(JSON.stringify(debugPayload, null, 2))}</pre></details>`;
+    }
+    el.smsSendResult.innerHTML = resultHtml;
     el.smsSendResult.classList.toggle("error", sent === 0);
     el.smsSendResult.hidden = false;
 

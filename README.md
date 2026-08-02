@@ -217,20 +217,22 @@ Vercel auto-detects the `/api` folder as Functions; no build step is required fo
 
 Not a Vercel Marketplace integration — I checked (`vercel integration discover --category messaging`) and the only native SMS/messaging product listed is Resend, which is email-only. SMS here is a direct integration with **Sozuri**, wired up the same way `DATABASE_URL` is: credentials read from environment variables, no SDK, just `fetch()` to their REST API.
 
-**The request/response contract in `api/sms.js` is verified** against Sozuri's official docs (`sozuri.net/docs/text`, `/docs/authentication`, `/docs/webhooks`, `/docs/2way`) — endpoint, headers, body fields, and both success/error response shapes all match what's documented.
+**The request/response contract in `api/sms.js` is verified** against Sozuri's official docs (`sozuri.net/docs/text`, `/docs/authentication`, `/docs/webhooks`, `/docs/2way`) **and a real send** (2026-08-02 — sent successfully to a real engineer, HTTP 200 with a `messageId` back).
 
-**⚠️ Known blocker as of this writing:** a live test call using the configured credentials returned `401 AUTHENTICATION_FAILED` directly from Sozuri (confirmed via `curl`, independent of any code in this app — so this isn't a bug to fix here). Two things to check on your Sozuri dashboard before sending will work:
-1. Sozuri's docs say the `project` field in the request body wants the project's **display name**, not its ID — `SOZURI_PROJECT_ID` may need to hold that name instead.
-2. Confirm the API key hasn't been regenerated/revoked since it was first copied, and that the account is verified/active for sending (not just created).
+**Two things learned the hard way, both now fixed in code:**
+1. `SOZURI_PROJECT_ID` must be the project's dashboard **display name** (e.g. `IEK ELECTION`), not the opaque project ID string — the ID gets a flat `401 AUTHENTICATION_FAILED` from Sozuri, no matter how correct everything else is.
+2. **Sozuri returns HTTP 200 even when a request fails** (e.g. bad recipient) — the real error lives in `messageData.message` with no `recipients` array. Checking `response.ok` alone silently treats this as success. `sendViaSozuri()` in `api/sms.js` now checks for a real `recipients[0]` entry, not just the HTTP status.
 
-**Before sending to real voters, regardless: select just one engineer (ideally your own phone) and send one test message first.**
+If a send still fails: the **SMS Draft Center**'s result banner has a **"Show last error detail"** disclosure with the exact outgoing request (API key redacted) and Sozuri's exact response — no server log access needed to debug it.
+
+**Before any bulk send to real voters: select just one engineer (ideally your own phone) and send one test message first.**
 
 ### Setup
 
-1. Sign up at Sozuri (https://sozuri.net) and grab your **Project** identifier (try the display name shown on your dashboard, not just the ID — see the blocker above) and **API Key**.
+1. Sign up at Sozuri (https://sozuri.net) and grab your project's **display name** (dashboard, not the opaque ID — see above) and **API Key**.
 2. Add to `.env.local` (local) and Vercel → Settings → Environment Variables (production):
    ```
-   SOZURI_PROJECT_ID=your-project-name-or-id
+   SOZURI_PROJECT_ID=your-project-display-name
    SOZURI_API_KEY=your-api-key
    SOZURI_SENDER=STARIKO
    SOZURI_CALLBACK_KEY=          # optional, see "Two-way SMS" below

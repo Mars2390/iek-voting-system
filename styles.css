@@ -1095,6 +1095,19 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
   border-color: rgba(187, 10, 30, 0.3);
 }
 
+.sms-debug { margin-top: 8px; font-weight: 400; font-size: 0.78rem; }
+.sms-debug summary { cursor: pointer; color: var(--text-muted); }
+.sms-debug pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  background: #1b1d22;
+  color: #d8f0e0;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .sms-log-wrap { margin-top: 4px; }
 .sms-log-wrap h3 { margin: 0; font-size: 1rem; }
 

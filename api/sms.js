@@ -3,7 +3,8 @@ import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 
 // =========================================================
 // SOZURI API CONTRACT — verified against https://sozuri.net/docs/text and
-// https://sozuri.net/docs/authentication (fetched 2026-08-02).
+// https://sozuri.net/docs/authentication, and confirmed with a live
+// auth-only test call (2026-08-02).
 //
 // POST https://sozuri.net/api/v1/messaging
 // Headers: Authorization: Bearer <API_KEY>, Content-Type: application/json
@@ -11,17 +12,14 @@ import { applyCors, getClientIp, logAudit, sendError } from "./_utils.js";
 // Success: { messageData: { messages: N }, recipients: [{ messageId, to, status, statusCode, ... }] }
 // Error:   { messageData: { message: "..." } }  -or-  { error_code, message, retryable }
 //
-// ⚠️ KNOWN ISSUE as of this writing: a live test call with the configured
-// SOZURI_PROJECT_ID/SOZURI_API_KEY returned HTTP 401 AUTHENTICATION_FAILED
-// from Sozuri directly (verified via curl, independent of this app's code).
-// Two things to check on the Sozuri dashboard before this will work:
-//   1. Sozuri's docs say the "project" field wants the project's *display
-//      name*, not its ID — SOZURI_PROJECT_ID may need to hold that name
-//      instead of the ID string originally provided.
-//   2. Confirm the API key hasn't been regenerated/revoked since it was
-//      copied, and that the account is verified/active for sending.
-// Once corrected, no code change should be needed — this file already
-// matches the documented contract.
+// CONFIRMED: SOZURI_PROJECT_ID must be the project's dashboard DISPLAY
+// NAME ("IEK ELECTION"), not the opaque project ID string — using the ID
+// produced 401 AUTHENTICATION_FAILED; the name authenticates correctly.
+//
+// ⚠️ GOTCHA: Sozuri returns HTTP 200 even for request-level errors (e.g.
+// a bad/missing recipient), with the real error in `messageData.message`
+// and NO `recipients` array. Checking `response.ok` alone is not enough —
+// see the `recipients` presence check below.
 // =========================================================
 const SOZURI_ENDPOINT = "https://sozuri.net/api/v1/messaging";
 
@@ -38,8 +36,10 @@ function toSozuriMsisdn(rawPhone) {
   return null;
 }
 
-// Throws only for whole-request transport/config failures — the caller
-// logs the specific outcome either way.
+// Throws for both transport failures and Sozuri-reported request errors
+// (including the HTTP-200-but-actually-an-error case — see file header).
+// `err.debugRequest` carries exactly what was sent (API key redacted) so
+// the caller can hand it back to the frontend for on-screen debugging.
 async function sendViaSozuri(phone, message) {
   const projectId = process.env.SOZURI_PROJECT_ID;
   const apiKey = process.env.SOZURI_API_KEY;
@@ -49,6 +49,19 @@ async function sendViaSozuri(phone, message) {
     throw new Error("SMS is not configured — set SOZURI_PROJECT_ID and SOZURI_API_KEY in your environment variables.");
   }
 
+  const requestBody = {
+    project: projectId,
+    from: sender || undefined,
+    to: phone,
+    message,
+    type: "transactional",
+  };
+  const debugRequest = { url: SOZURI_ENDPOINT, headers: { Authorization: "Bearer [redacted]", "Content-Type": "application/json" }, body: requestBody };
+
+  // Visible in `vercel logs` / the Vercel dashboard function logs — never
+  // logs the API key itself.
+  console.log("[sozuri] request:", JSON.stringify(requestBody));
+
   let response;
   try {
     response = await fetch(SOZURI_ENDPOINT, {
@@ -57,21 +70,23 @@ async function sendViaSozuri(phone, message) {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        project: projectId,
-        from: sender || undefined,
-        to: phone,
-        message,
-        type: "transactional",
-      }),
+      body: JSON.stringify(requestBody),
     });
   } catch (networkErr) {
-    throw new Error(`Could not reach Sozuri: ${networkErr.message}`);
+    const err = new Error(`Could not reach Sozuri: ${networkErr.message}`);
+    err.debugRequest = debugRequest;
+    throw err;
   }
 
   const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(body?.messageData?.message || body?.message || `Sozuri returned HTTP ${response.status}`);
+  console.log("[sozuri] response:", response.status, JSON.stringify(body));
+
+  const recipient = body?.recipients?.[0];
+  if (!response.ok || !recipient) {
+    const err = new Error(body?.messageData?.message || body?.message || `Sozuri returned HTTP ${response.status} with no recipient confirmation.`);
+    err.debugRequest = debugRequest;
+    err.debugResponse = body;
+    throw err;
   }
 
   return body;
@@ -219,7 +234,10 @@ export default async function handler(req, res) {
           INSERT INTO sms_log (engineer_id, phone, message, status, provider_status, sent_by)
           VALUES (${eid}, ${normalizedPhone}, ${trimmedMessage}, 'failed', ${err.message.slice(0, 45)}, ${trimmedSentBy})
         `;
-        return res.status(200).json({ status: "failed", engineerId: eid, phone: normalizedPhone, error: err.message });
+        return res.status(200).json({
+          status: "failed", engineerId: eid, phone: normalizedPhone, error: err.message,
+          debugRequest: err.debugRequest, debugResponse: err.debugResponse,
+        });
       }
     }
 
