@@ -389,7 +389,7 @@ Setting `voted: true` via `PUT /api/engineers/:id` inserts a row into `votes` (w
 The voting window is hardcoded in `api/_config.js`:
 
 ```js
-export const VOTING_START = new Date("2026-08-03T00:00:00+03:00"); // Mon Aug 3 2026, 12:00 AM (midnight) EAT
+export const VOTING_START = new Date("2026-08-03T08:00:00+03:00"); // Mon Aug 3 2026, 8:00 AM EAT
 export const VOTING_END   = new Date("2026-08-03T17:00:00+03:00"); // Mon Aug 3 2026, 5:00 PM EAT
 ```
 
@@ -492,7 +492,7 @@ A few more specifics for election day:
 - [ ] Confirm `ALLOW_TEST_VOTES` is **not** set to `true` in Vercel (Settings → Environment Variables). If you added it to test, remove it or set it to `false`, then redeploy.
 - [ ] Register every eligible engineer (via the form, **Import CSV**, or `POST /api/import`).
 - [ ] Add every candidate (e.g. Eng. Stariko Nyamori — Honorary Treasurer) via **+ Add Candidate** in the Candidates & Results section.
-- [ ] Double-check `api/_config.js` has the correct start/end date/time if it ever needs to change — it now unlocks at **midnight** Monday, not 8 AM.
+- [ ] Double-check `api/_config.js` has the correct start/end date/time if it ever needs to change — it now unlocks at **8:00 AM** Monday, matching what the SMS templates tell voters.
 - [ ] Run **Reset All Votes** once, right before the real window opens, if anyone cast test votes while `ALLOW_TEST_VOTES` was on — otherwise their test vote will still show as "Voted" on the real day, and **it can no longer be undone per-row** once real voting starts.
 - [ ] Set your name via the identity badge before logging any calls, so history is attributed correctly.
 - [ ] Start working through **📅 Today's Agenda** / **🚨 Urgent** to reach everyone before Monday.
@@ -500,7 +500,7 @@ A few more specifics for election day:
 - [ ] Read the [Security note](#security-note-please-read) — there is currently no login, so anyone with the link can vote, add, or edit, and votes can't be corrected in-app once cast. Fine for a supervised in-person check-in desk; not fine if the link goes somewhere uncontrolled.
 
 **On election day:**
-- [ ] The countdown banner flips to "🟢 VOTING IS LIVE!" automatically at **midnight** — no action needed.
+- [ ] The countdown banner flips to "🟢 VOTING IS LIVE!" automatically at **8:00 AM** — no action needed.
 - [ ] Vote buttons enable automatically at the same moment across every open device/tab.
 - [ ] Use **View Audit Log** any time to see a live who/what/when trail of every action.
 - [ ] At 5:00 PM the banner flips to "🔴 VOTING CLOSED" and vote buttons disable automatically — again, no action needed.
