@@ -175,6 +175,41 @@ async function main() {
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_contact_calls_engineer_id ON contact_calls(engineer_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_remarks_engineer_id ON remarks(engineer_id)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS sms_log (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+      phone VARCHAR(20),
+      message TEXT,
+      status VARCHAR(20),
+      provider_status VARCHAR(50),
+      provider_message_id VARCHAR(120),
+      sent_by VARCHAR(100),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS sms_drafts (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(100) NOT NULL,
+      message TEXT NOT NULL,
+      created_by VARCHAR(100),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS sms_replies (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE SET NULL,
+      phone VARCHAR(20),
+      message TEXT,
+      matched_keyword VARCHAR(50),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sms_log_engineer_id ON sms_log(engineer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sms_replies_engineer_id ON sms_replies(engineer_id)`;
 
   await sql`UPDATE engineers SET contact_status = 'pending' WHERE contact_status = 'not_contacted'`;
   await sql`UPDATE engineers SET contact_status = 'busy_declined' WHERE contact_status = 'declined'`;

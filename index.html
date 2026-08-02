@@ -57,6 +57,7 @@
     <button class="quick-nav-btn" data-target="agendaSection" type="button">&#128197; Today's Agenda</button>
     <button class="quick-nav-btn" data-target="candidatesSection" type="button">&#128499;&#65039; Candidates</button>
     <button class="quick-nav-btn" data-target="turnoutSection" type="button">&#128203; Turnout Table</button>
+    <button class="quick-nav-btn" data-target="smsSection" type="button">&#128241; SMS Center</button>
   </nav>
 </header>
 
@@ -202,6 +203,125 @@
     <div id="agendaEmpty" class="empty-state" hidden><p>&#9989; Everyone has been reached.</p></div>
   </section>
 
+  <!-- SMS Draft Center -->
+  <section class="panel sms-panel" id="smsSection">
+    <div class="table-panel-header">
+      <h2>&#128241; SMS Draft Center</h2>
+      <span class="sms-credit-badge" id="smsCreditBadge">&#128176; Credits: &mdash;</span>
+    </div>
+    <p class="candidates-caption">
+      Compose a message and pick recipients below, then send. Use <code>[Name]</code> anywhere in the
+      message to personalize it per engineer &mdash; sent one-by-one via Sozuri to the phone number on file.
+    </p>
+
+    <div class="sms-composer">
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="smsTemplateSelect">Template</label>
+          <select id="smsTemplateSelect">
+            <option value="">Custom message&hellip;</option>
+            <option value="Dear [Name], voting starts Monday 8AM at IEK Headquarters. Please come and vote. Reply YES to confirm. - STARIKO">Before election &mdash; reminder + confirm</option>
+            <option value="Dear [Name], this is a reminder that voting is today at IEK Headquarters. Your vote matters! - STARIKO">Election day reminder</option>
+            <option value="Dear [Name], thank you for voting! Your participation matters. - STARIKO">Thank you for voting</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="smsDraftSelect">Saved Drafts</label>
+          <select id="smsDraftSelect">
+            <option value="">Load a saved draft&hellip;</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-field">
+        <label for="smsMessage">Message</label>
+        <textarea id="smsMessage" rows="4" maxlength="480" placeholder="Type your message... use [Name] to personalize"></textarea>
+        <span class="sms-char-count" id="smsCharCount">0 characters (1 SMS part)</span>
+      </div>
+      <div class="sms-composer-actions">
+        <button class="btn btn-outline btn-sm" id="smsSaveDraftBtn" type="button">&#128190; Save Draft</button>
+        <button class="btn btn-outline btn-sm" id="smsDeleteDraftBtn" type="button" hidden>&#128465;&#65039; Delete Loaded Draft</button>
+      </div>
+    </div>
+
+    <div class="sms-recipients">
+      <div class="table-panel-header">
+        <h3>Recipients</h3>
+        <span id="smsRecipientCount" class="results-count">0 selected</span>
+      </div>
+      <div class="sms-quick-select" role="group" aria-label="Quick recipient selection">
+        <button class="btn btn-outline btn-sm" data-sms-select="all" type="button">Select All</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="not-voted" type="button">Select Not Voted</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="confirmed" type="button">Select Confirmed</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="not_reachable" type="button">Select Not Reachable</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="clear" type="button">Clear All</button>
+      </div>
+      <div class="controls-row">
+        <select id="smsVoteFilter" class="filter-select" aria-label="Filter recipients by voter status">
+          <option value="">Any voter status</option>
+          <option value="voted">Voted</option>
+          <option value="not-voted">Not Voted</option>
+        </select>
+        <select id="smsContactFilter" class="filter-select" aria-label="Filter recipients by call status">
+          <option value="">Any call status</option>
+          <option value="pending">Pending</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="no_answer">No Answer</option>
+          <option value="busy_declined">Busy/Declined</option>
+          <option value="follow_up">Follow-up Needed</option>
+          <option value="not_reachable">Not Reachable</option>
+        </select>
+        <input type="text" id="smsRecipientSearch" placeholder="Search recipients...">
+      </div>
+      <div class="sms-recipient-list" id="smsRecipientList"></div>
+    </div>
+
+    <div class="sms-send-row">
+      <button class="btn btn-primary" id="smsSendBtn" type="button">&#128228; Send to Selected</button>
+      <div class="sms-progress-wrap" id="smsProgressWrap" hidden>
+        <div class="sms-progress-track"><div class="sms-progress-fill" id="smsProgressFill"></div></div>
+        <span id="smsProgressText">Sending: 0/0</span>
+      </div>
+    </div>
+    <div class="sms-send-result" id="smsSendResult" hidden></div>
+
+    <div class="sms-log-wrap">
+      <div class="table-panel-header">
+        <h3>SMS Log</h3>
+        <button class="btn btn-outline btn-sm" id="smsRepliesToggleBtn" type="button">&#128172; View Replies</button>
+      </div>
+      <div class="table-scroll">
+        <table id="smsLogTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Engineer</th>
+              <th>Phone</th>
+              <th>Message</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="smsLogTableBody"><tr><td colspan="5">No SMS sent yet.</td></tr></tbody>
+        </table>
+      </div>
+      <div id="smsRepliesPanel" hidden>
+        <div class="table-scroll">
+          <table id="smsRepliesTable">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Engineer</th>
+                <th>Phone</th>
+                <th>Message</th>
+                <th>Auto-action</th>
+              </tr>
+            </thead>
+            <tbody id="smsRepliesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Connection error banner -->
   <div id="connectionBanner" class="connection-banner" role="alert" hidden>
     <span class="connection-banner-icon">&#9888;&#65039;</span>
@@ -290,6 +410,7 @@
       <option value="pending">Mark as: Pending</option>
     </select>
     <button class="btn btn-primary btn-sm" id="bulkApplyBtn" type="button">Apply to Selected</button>
+    <button class="btn btn-secondary btn-sm" id="bulkSmsBtn" type="button">&#128241; SMS Selected</button>
     <button class="btn btn-secondary btn-sm" id="bulkExportBtn" type="button">Export Selected</button>
     <button class="btn btn-secondary btn-sm" id="bulkPrintBtn" type="button">Print Call List</button>
     <button class="btn btn-outline btn-sm" id="bulkClearBtn" type="button">Clear Selection</button>

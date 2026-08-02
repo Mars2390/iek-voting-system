@@ -115,3 +115,46 @@ CREATE INDEX IF NOT EXISTS idx_contact_calls_engineer_id ON contact_calls(engine
 CREATE INDEX IF NOT EXISTS idx_contact_calls_called_at ON contact_calls(called_at);
 CREATE INDEX IF NOT EXISTS idx_remarks_engineer_id ON remarks(engineer_id);
 CREATE INDEX IF NOT EXISTS idx_remarks_created_at ON remarks(created_at);
+
+-- One row per phone number per send attempt (a send to 50 people, one
+-- personalized message at a time, creates 50 rows — this is also what
+-- powers the "Sent: 10/50" progress the UI shows during a send).
+CREATE TABLE IF NOT EXISTS sms_log (
+    id SERIAL PRIMARY KEY,
+    engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+    phone VARCHAR(20),
+    message TEXT,
+    status VARCHAR(20),              -- 'sent' | 'failed' | 'invalid_phone'
+    provider_status VARCHAR(50),     -- raw status string from Sozuri
+    provider_message_id VARCHAR(120),
+    sent_by VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Saved message drafts (the "SMS Draft Center" composer) — reusable
+-- templates beyond the 3 built-in ones, editable/loadable by name.
+CREATE TABLE IF NOT EXISTS sms_drafts (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    message TEXT NOT NULL,
+    created_by VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Inbound replies (two-way SMS). engineer_id is nullable because a reply
+-- might come from a number that doesn't match anyone in the register
+-- (wrong number, someone else's phone, etc) — still logged, just unmatched.
+CREATE TABLE IF NOT EXISTS sms_replies (
+    id SERIAL PRIMARY KEY,
+    engineer_id INTEGER REFERENCES engineers(id) ON DELETE SET NULL,
+    phone VARCHAR(20),
+    message TEXT,
+    matched_keyword VARCHAR(50),     -- e.g. 'YES' / 'VOTE' if it triggered an auto-confirm, else NULL
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_log_engineer_id ON sms_log(engineer_id);
+CREATE INDEX IF NOT EXISTS idx_sms_log_created_at ON sms_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_sms_replies_engineer_id ON sms_replies(engineer_id);
+CREATE INDEX IF NOT EXISTS idx_sms_replies_phone ON sms_replies(phone);

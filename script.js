@@ -49,6 +49,9 @@
   let pollTimer = null;
   let countdownTimer = null;
   let callModalStatus = null;
+  let smsSelectedIds = new Set();
+  let smsDraftsById = new Map();
+  let smsLoadedDraftId = null;
 
   // ---------- DOM references ----------
   const el = {
@@ -146,6 +149,30 @@
     detailsModalName: document.getElementById("detailsModalName"),
     detailsModalBody: document.getElementById("detailsModalBody"),
     detailsModalClose: document.getElementById("detailsModalClose"),
+    bulkSmsBtn: document.getElementById("bulkSmsBtn"),
+    smsSection: document.getElementById("smsSection"),
+    smsCreditBadge: document.getElementById("smsCreditBadge"),
+    smsTemplateSelect: document.getElementById("smsTemplateSelect"),
+    smsDraftSelect: document.getElementById("smsDraftSelect"),
+    smsMessage: document.getElementById("smsMessage"),
+    smsCharCount: document.getElementById("smsCharCount"),
+    smsSaveDraftBtn: document.getElementById("smsSaveDraftBtn"),
+    smsDeleteDraftBtn: document.getElementById("smsDeleteDraftBtn"),
+    smsRecipientCount: document.getElementById("smsRecipientCount"),
+    smsQuickSelectBtns: document.querySelectorAll("[data-sms-select]"),
+    smsVoteFilter: document.getElementById("smsVoteFilter"),
+    smsContactFilter: document.getElementById("smsContactFilter"),
+    smsRecipientSearch: document.getElementById("smsRecipientSearch"),
+    smsRecipientList: document.getElementById("smsRecipientList"),
+    smsSendBtn: document.getElementById("smsSendBtn"),
+    smsProgressWrap: document.getElementById("smsProgressWrap"),
+    smsProgressFill: document.getElementById("smsProgressFill"),
+    smsProgressText: document.getElementById("smsProgressText"),
+    smsSendResult: document.getElementById("smsSendResult"),
+    smsLogTableBody: document.getElementById("smsLogTableBody"),
+    smsRepliesToggleBtn: document.getElementById("smsRepliesToggleBtn"),
+    smsRepliesPanel: document.getElementById("smsRepliesPanel"),
+    smsRepliesTableBody: document.getElementById("smsRepliesTableBody"),
   };
 
   // ---------- Utilities ----------
@@ -505,6 +532,7 @@
               ${voteAction}
               <button class="btn-icon-sm" data-action="call" data-id="${e.id}">&#128222; Call</button>
               <button class="btn-icon-sm" data-action="never-picked-up" data-id="${e.id}" title="Quick-log: No Answer">&#128222; Never Picked Up</button>
+              <button class="btn-icon-sm" data-action="sms" data-id="${e.id}">&#128172; SMS</button>
               <button class="btn-icon-sm" data-action="details" data-id="${e.id}">&#128065; Details</button>
               <button class="btn-icon-sm" data-action="edit" data-id="${e.id}">Edit</button>
               <button class="btn-delete" data-action="delete" data-id="${e.id}">Remove</button>
@@ -854,6 +882,7 @@
       renderStats(stats);
       renderCandidates();
       renderAgenda();
+      renderSmsRecipientList();
       el.lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
       if (!silent) showToast("Data refreshed from the database.");
     } catch (err) {
@@ -1094,6 +1123,272 @@
     }
   }
 
+  // ---------- SMS Draft Center ----------
+  function updateSmsCharCount() {
+    const len = el.smsMessage.value.length;
+    const parts = len === 0 ? 1 : Math.ceil(len / 160);
+    el.smsCharCount.textContent = `${len} character${len === 1 ? "" : "s"} (${parts} SMS part${parts === 1 ? "" : "s"})`;
+  }
+
+  function personalizeSmsMessage(template, engineer) {
+    return template.replace(/\[Name\]/gi, engineer.name);
+  }
+
+  function getSmsFilteredEngineers() {
+    const q = el.smsRecipientSearch.value.trim().toLowerCase();
+    const voteFilter = el.smsVoteFilter.value;
+    const contactFilter = el.smsContactFilter.value;
+
+    return engineers.filter((e) => {
+      const matchesQuery = !q ||
+        e.name.toLowerCase().includes(q) ||
+        e.iek_number.toLowerCase().includes(q) ||
+        (e.phone || "").toLowerCase().includes(q);
+      const matchesVote =
+        !voteFilter || (voteFilter === "voted" && e.voted) || (voteFilter === "not-voted" && !e.voted);
+      const matchesContact = !contactFilter || e.contact_status === contactFilter;
+      return matchesQuery && matchesVote && matchesContact;
+    });
+  }
+
+  function updateSmsRecipientCount() {
+    el.smsRecipientCount.textContent = `${smsSelectedIds.size} selected`;
+  }
+
+  function renderSmsRecipientList() {
+    const list = getSmsFilteredEngineers();
+
+    if (list.length === 0) {
+      el.smsRecipientList.innerHTML = `<p class="empty-state">No engineers match these filters.</p>`;
+    } else {
+      el.smsRecipientList.innerHTML = list.map((e) => `
+        <label class="sms-recipient-row${e.phone ? "" : " sms-recipient-row-disabled"}">
+          <input type="checkbox" class="sms-recipient-checkbox" data-id="${e.id}"
+            ${smsSelectedIds.has(e.id) ? "checked" : ""} ${e.phone ? "" : "disabled"}>
+          <span class="sms-recipient-name">${escapeHtml(e.name)}</span>
+          <span class="sms-recipient-phone">${e.phone ? escapeHtml(e.phone) : "No phone on file"}</span>
+          <span class="status-badge ${e.voted ? "voted" : "not-voted"}">${e.voted ? "Voted" : "Not Voted"}</span>
+        </label>
+      `).join("");
+    }
+    updateSmsRecipientCount();
+  }
+
+  function smsQuickSelect(kind) {
+    if (kind === "clear") {
+      smsSelectedIds.clear();
+    } else if (kind === "all") {
+      engineers.forEach((e) => { if (e.phone) smsSelectedIds.add(e.id); });
+    } else if (kind === "not-voted") {
+      engineers.forEach((e) => { if (e.phone && !e.voted) smsSelectedIds.add(e.id); });
+    } else {
+      // "confirmed" / "not_reachable" / any other contact_status value
+      engineers.forEach((e) => { if (e.phone && e.contact_status === kind) smsSelectedIds.add(e.id); });
+    }
+    renderSmsRecipientList();
+  }
+
+  function selectEngineerForSms(id) {
+    smsSelectedIds.clear();
+    smsSelectedIds.add(Number(id));
+    renderSmsRecipientList();
+    el.smsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function selectEngineersForSms(ids) {
+    smsSelectedIds = new Set(ids.map(Number));
+    renderSmsRecipientList();
+    el.smsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function sendSmsToSelected() {
+    if (isBusy) return;
+
+    const message = el.smsMessage.value.trim();
+    if (!message) { showToast("Write a message first.", true); return; }
+    if (smsSelectedIds.size === 0) { showToast("Select at least one recipient.", true); return; }
+
+    const sender = ensureIdentity();
+    if (!sender) { showToast("Enter your name first.", true); return; }
+
+    const recipients = engineers.filter((e) => smsSelectedIds.has(e.id) && e.phone);
+    if (recipients.length === 0) { showToast("None of the selected recipients have a phone number on file.", true); return; }
+
+    if (!confirm(`Send this SMS to ${recipients.length} recipient${recipients.length === 1 ? "" : "s"}?\n\n"${message}"`)) return;
+
+    setBusy(true);
+    el.smsSendBtn.disabled = true;
+    el.smsSendResult.hidden = true;
+    el.smsProgressWrap.hidden = false;
+    el.smsProgressFill.style.width = "0%";
+
+    const total = recipients.length;
+    let sent = 0, failed = 0, invalidPhone = 0;
+    el.smsProgressText.textContent = `Sending: 0/${total}`;
+
+    // Limited concurrency, not one giant batch request — this is what
+    // makes the "Sent: X/Y" progress bar move in real time and lets each
+    // recipient get their own [Name]-personalized message.
+    const CONCURRENCY = 3;
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < recipients.length) {
+        const engineer = recipients[nextIndex++];
+        const personalized = personalizeSmsMessage(message, engineer);
+        try {
+          const result = await apiFetch("/api/sms", {
+            method: "POST",
+            body: JSON.stringify({ engineerId: engineer.id, message: personalized, sentBy: sender }),
+          });
+          if (result.status === "sent") sent++;
+          else if (result.status === "invalid_phone") invalidPhone++;
+          else failed++;
+        } catch (err) {
+          failed++;
+        }
+        const done = sent + failed + invalidPhone;
+        el.smsProgressText.textContent = `Sending: ${done}/${total}`;
+        el.smsProgressFill.style.width = `${Math.round((done / total) * 100)}%`;
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, recipients.length) }, worker));
+
+    el.smsProgressWrap.hidden = true;
+    el.smsSendBtn.disabled = false;
+    setBusy(false);
+
+    const parts = [`&#9989; Sent: ${sent}`];
+    if (failed) parts.push(`&#10060; Failed: ${failed}`);
+    if (invalidPhone) parts.push(`&#9888;&#65039; No usable phone: ${invalidPhone}`);
+    el.smsSendResult.innerHTML = parts.join(" &nbsp; ");
+    el.smsSendResult.classList.toggle("error", sent === 0);
+    el.smsSendResult.hidden = false;
+
+    showToast(`SMS: ${sent} sent${failed ? `, ${failed} failed` : ""}${invalidPhone ? `, ${invalidPhone} invalid phone` : ""}`, sent === 0);
+    markActivity();
+    smsSelectedIds.clear();
+    renderSmsRecipientList();
+    await loadSmsLog();
+    await loadSmsCredits();
+  }
+
+  async function loadSmsLog() {
+    try {
+      const data = await apiFetch("/api/sms");
+      if (data.messages.length === 0) {
+        el.smsLogTableBody.innerHTML = `<tr><td colspan="5">No SMS sent yet.</td></tr>`;
+        return;
+      }
+      el.smsLogTableBody.innerHTML = data.messages.slice(0, 50).map((m) => `
+        <tr>
+          <td>${formatDateTime(m.created_at)}</td>
+          <td>${m.iek_number ? escapeHtml(`${m.engineer_name} (${m.iek_number})`) : "—"}</td>
+          <td>${escapeHtml(m.phone || "")}</td>
+          <td>${escapeHtml(m.message)}</td>
+          <td>${escapeHtml(m.status)}</td>
+        </tr>
+      `).join("");
+    } catch (err) {
+      el.smsLogTableBody.innerHTML = `<tr><td colspan="5">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  async function loadSmsCredits() {
+    try {
+      const data = await apiFetch("/api/sms?kind=balance");
+      el.smsCreditBadge.textContent = typeof data.balance === "number"
+        ? `\u{1F4B0} Credits: ${data.balance}`
+        : "\u{1F4B0} Credits: —";
+    } catch (err) {
+      el.smsCreditBadge.textContent = "\u{1F4B0} Credits: —";
+    }
+  }
+
+  async function toggleSmsReplies() {
+    const willOpen = el.smsRepliesPanel.hidden;
+    el.smsRepliesPanel.hidden = !willOpen;
+    if (!willOpen) return;
+
+    el.smsRepliesTableBody.innerHTML = `<tr><td colspan="5">Loading…</td></tr>`;
+    try {
+      const data = await apiFetch("/api/sms?kind=replies");
+      if (data.replies.length === 0) {
+        el.smsRepliesTableBody.innerHTML = `<tr><td colspan="5">No replies yet.</td></tr>`;
+        return;
+      }
+      el.smsRepliesTableBody.innerHTML = data.replies.map((r) => `
+        <tr>
+          <td>${formatDateTime(r.created_at)}</td>
+          <td>${r.iek_number ? escapeHtml(`${r.engineer_name} (${r.iek_number})`) : "Unmatched number"}</td>
+          <td>${escapeHtml(r.phone || "")}</td>
+          <td>${escapeHtml(r.message)}</td>
+          <td>${r.matched_keyword ? `&#9989; Auto-confirmed (${escapeHtml(r.matched_keyword)})` : "—"}</td>
+        </tr>
+      `).join("");
+    } catch (err) {
+      el.smsRepliesTableBody.innerHTML = `<tr><td colspan="5">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  async function loadSmsDrafts() {
+    try {
+      const data = await apiFetch("/api/sms?kind=drafts");
+      smsDraftsById = new Map(data.drafts.map((d) => [d.id, d]));
+      el.smsDraftSelect.innerHTML = `<option value="">Load a saved draft&hellip;</option>` +
+        data.drafts.map((d) => `<option value="${d.id}">${escapeHtml(d.title)}</option>`).join("");
+    } catch (err) {
+      // Non-critical — the composer still works without saved drafts.
+    }
+  }
+
+  async function saveSmsDraft() {
+    const message = el.smsMessage.value.trim();
+    if (!message) { showToast("Write a message before saving it as a draft.", true); return; }
+    const title = (prompt("Name this draft:", message.slice(0, 30)) || "").trim();
+    if (!title) return;
+
+    const sender = getIdentity();
+    try {
+      await apiFetch("/api/sms?kind=drafts", {
+        method: "POST",
+        body: JSON.stringify({ title, message, createdBy: sender || undefined }),
+      });
+      showToast(`Draft "${title}" saved.`);
+      await loadSmsDrafts();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  function loadSmsDraft(id) {
+    const draft = smsDraftsById.get(Number(id));
+    if (!draft) {
+      smsLoadedDraftId = null;
+      el.smsDeleteDraftBtn.hidden = true;
+      return;
+    }
+    el.smsMessage.value = draft.message;
+    updateSmsCharCount();
+    smsLoadedDraftId = draft.id;
+    el.smsDeleteDraftBtn.hidden = false;
+  }
+
+  async function deleteSmsDraft() {
+    if (!smsLoadedDraftId) return;
+    if (!confirm("Delete this saved draft? This cannot be undone.")) return;
+
+    try {
+      await apiFetch(`/api/sms?kind=drafts&id=${smsLoadedDraftId}`, { method: "DELETE" });
+      showToast("Draft deleted.");
+      smsLoadedDraftId = null;
+      el.smsDeleteDraftBtn.hidden = true;
+      el.smsDraftSelect.value = "";
+      await loadSmsDrafts();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
   // ---------- Engineer Details modal ----------
   async function openDetailsModal(id) {
     const e = engineers.find((x) => String(x.id) === String(id));
@@ -1105,15 +1400,17 @@
     el.detailsModalOverlay.hidden = false;
 
     try {
-      const [callsData, remarksData] = await Promise.all([
+      const [callsData, remarksData, smsData] = await Promise.all([
         apiFetch(`/api/contact-calls?engineerId=${e.id}`),
         apiFetch(`/api/remarks?engineerId=${e.id}`),
+        apiFetch(`/api/sms?engineerId=${e.id}`),
       ]);
 
       const timeline = [
         ...(e.voted_at ? [{ at: e.voted_at, action: "Voted", person: "System", notes: `✅ Voted at ${formatDateTime(e.voted_at)}` }] : []),
         ...callsData.calls.map((c) => ({ at: c.called_at, action: "Called", person: c.caller_name, notes: `${CONTACT_STATUS_ICONS[c.call_status] || ""} ${CONTACT_STATUS_LABELS[c.call_status] || c.call_status}${c.notes ? " — " + c.notes : ""}` })),
         ...remarksData.remarks.map((r) => ({ at: r.created_at, action: "Remark", person: r.author, notes: r.remark })),
+        ...smsData.messages.map((s) => ({ at: s.created_at, action: "SMS", person: s.sent_by, notes: `[${s.status}] ${s.message}` })),
       ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
       const detailGrid = `
@@ -1535,6 +1832,10 @@
       if (select && !isBusy) quickSetContactStatus(select.getAttribute("data-id"), select.value);
     });
     el.bulkApplyBtn.addEventListener("click", bulkApplyStatus);
+    el.bulkSmsBtn.addEventListener("click", () => {
+      if (selectedIds.size === 0) { showToast("Select engineers in the table first.", true); return; }
+      selectEngineersForSms(Array.from(selectedIds));
+    });
     el.bulkExportBtn.addEventListener("click", bulkExportSelected);
     el.bulkPrintBtn.addEventListener("click", bulkPrintCallList);
     el.bulkClearBtn.addEventListener("click", () => { selectedIds.clear(); render(); });
@@ -1547,6 +1848,7 @@
       if (action === "vote") markVoted(id);
       if (action === "call") openCallModal(id);
       if (action === "never-picked-up") quickNeverPickedUp(id);
+      if (action === "sms") selectEngineerForSms(id);
       if (action === "details") openDetailsModal(id);
       if (action === "edit") openFormForEdit(id);
       if (action === "delete") deleteEngineer(id);
@@ -1585,6 +1887,32 @@
     el.detailsModalOverlay.addEventListener("click", (evt) => {
       if (evt.target === el.detailsModalOverlay) closeDetailsModal();
     });
+
+    // SMS Draft Center
+    el.smsTemplateSelect.addEventListener("change", () => {
+      if (el.smsTemplateSelect.value) el.smsMessage.value = el.smsTemplateSelect.value;
+      updateSmsCharCount();
+    });
+    el.smsMessage.addEventListener("input", updateSmsCharCount);
+    el.smsDraftSelect.addEventListener("change", () => loadSmsDraft(el.smsDraftSelect.value));
+    el.smsSaveDraftBtn.addEventListener("click", saveSmsDraft);
+    el.smsDeleteDraftBtn.addEventListener("click", deleteSmsDraft);
+    el.smsSendBtn.addEventListener("click", sendSmsToSelected);
+    el.smsRepliesToggleBtn.addEventListener("click", toggleSmsReplies);
+    el.smsQuickSelectBtns.forEach((btn) => {
+      btn.addEventListener("click", () => smsQuickSelect(btn.getAttribute("data-sms-select")));
+    });
+    el.smsVoteFilter.addEventListener("change", renderSmsRecipientList);
+    el.smsContactFilter.addEventListener("change", renderSmsRecipientList);
+    el.smsRecipientSearch.addEventListener("input", renderSmsRecipientList);
+    el.smsRecipientList.addEventListener("change", (evt) => {
+      const checkbox = evt.target.closest(".sms-recipient-checkbox");
+      if (!checkbox) return;
+      const id = Number(checkbox.getAttribute("data-id"));
+      if (checkbox.checked) smsSelectedIds.add(id);
+      else smsSelectedIds.delete(id);
+      updateSmsRecipientCount();
+    });
   }
 
   // ---------- Init ----------
@@ -1598,6 +1926,7 @@
     await refreshElectionStatus();
     await loadAll({ silent: true });
     await loadUrgentAndAnalytics();
+    await Promise.all([loadSmsDrafts(), loadSmsLog(), loadSmsCredits()]);
 
     startPolling();
     startCountdownTicking();

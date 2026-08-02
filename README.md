@@ -46,7 +46,7 @@ IEK-VOTING-FULL/
 ├── images/
 │   ├── iek-logo.jpg           # Official IEK logo (used in the header)
 │   └── stariko-nyamori.jpg    # Candidate portrait (used on the candidate card)
-├── api/                      # 10 function files total — see "Serverless function count" below
+├── api/                      # 11 function files total — see "Serverless function count" below
 │   ├── _db.js                # Shared Neon connection (lazy-initialized)
 │   ├── _utils.js              # CORS, audit logging, IP extraction, error helper
 │   ├── _config.js             # Election window (start/end) + phase logic
@@ -58,7 +58,9 @@ IEK-VOTING-FULL/
 │   ├── stats.js               # GET — total/voted/notVoted/turnout/needsFollowUp
 │   ├── reset-votes.js         # POST — reset all engineers to "not voted"
 │   ├── export.js              # GET — CSV/Excel download, ?type=engineers|stats|candidates|calls|remarks
-│   └── import.js              # POST — bulk-add engineers from CSV text
+│   ├── import.js              # POST — bulk-add engineers from CSV text
+│   ├── sms.js                 # GET (log)/POST (send)/?kind=drafts|replies|balance — Sozuri SMS, see "SMS Draft Center" below
+│   └── sms-reply.js           # POST — inbound Sozuri webhook for two-way SMS replies
 ├── setup.js                  # One-command bootstrap: tables + sync + git push + deploy
 ├── fix-database.js           # Cleanup + clean re-import (see git history for context)
 ├── .env.example             # Template for required env vars (committed)
@@ -81,7 +83,7 @@ This project hit that limit directly: adding 4 new endpoints in one pass (16 tot
 find api -maxdepth 1 -name "*.js" | grep -v "/_" | wc -l
 ```
 
-Currently **10** (2 under the limit). The pattern used to consolidate here — one file per *resource*, dispatching on `req.query.id` for single-item ops and a `?type=`/`?kind=` marker for otherwise-unrelated GET reports, with `vercel.json` rewrites keeping the original URLs intact — is the way to add more without hitting this again. If you outgrow 12 functions even with consolidation, upgrading to a paid Vercel plan removes the limit.
+Currently **11** (1 under the limit). The pattern used to consolidate here — one file per *resource*, dispatching on `req.query.id` for single-item ops and a `?type=`/`?kind=` marker for otherwise-unrelated GET reports, with `vercel.json` rewrites keeping the original URLs intact — is the way to add more without hitting this again. `api/sms.js` alone covers send/log/drafts/replies/balance this way rather than becoming 5 separate files. `api/sms-reply.js` stayed a separate file since it's an inbound webhook with a different caller (Sozuri, not the browser) and a different auth shape — folding it into `sms.js` would have made that file's dispatch logic harder to follow for no function-count benefit (still 11 either way). If you outgrow 12 functions even with consolidation, upgrading to a paid Vercel plan removes the limit.
 
 ---
 
@@ -211,6 +213,52 @@ Vercel auto-detects the `/api` folder as Functions; no build step is required fo
 
 ---
 
+## 6. SMS Draft Center (optional)
+
+Not a Vercel Marketplace integration — I checked (`vercel integration discover --category messaging`) and the only native SMS/messaging product listed is Resend, which is email-only. SMS here is a direct integration with **Sozuri**, wired up the same way `DATABASE_URL` is: credentials read from environment variables, no SDK, just `fetch()` to their REST API.
+
+**⚠️ Unverified API contract.** I do not have confirmed, current documentation for Sozuri's exact endpoint URL, request body shape, or response shape — `api/sms.js` (`sendViaSozuri()`) and the `?kind=balance` handler are a best-effort implementation, clearly flagged in code comments. **Before sending to real voters: select just one engineer (ideally your own phone number) and send one test message first.** If it fails, the returned error includes Sozuri's raw response — use that to adjust `sendViaSozuri()`; everything else in the file (logging, phone normalization, drafts, replies) doesn't depend on the exact contract and needs no changes.
+
+### Setup
+
+1. Sign up at Sozuri (https://sozuri.net) and grab your **Project ID** and **API Key** from the dashboard.
+2. Add to `.env.local` (local) and Vercel → Settings → Environment Variables (production):
+   ```
+   SOZURI_PROJECT_ID=your-project-id
+   SOZURI_API_KEY=your-api-key
+   SOZURI_SENDER=STARIKO
+   ```
+   `SOZURI_SENDER` is the alphanumeric sender ID recipients see. Most SMS gateways cap this at **11 characters** (the GSM alphanumeric sender ID limit) — that's why this project uses `STARIKO` rather than the longer `IEKVOTESTARIKOO`.
+3. Run `node setup.js` to create the `sms_log`, `sms_drafts`, and `sms_replies` tables, then deploy.
+4. Send one test SMS to your own number from the **SMS Draft Center** section before any bulk send (see the unverified-contract warning above).
+
+### How it works — SMS Draft Center
+
+Everything SMS-related lives in one section (**📱 SMS Center** in the nav bar), not scattered across modals:
+
+- **Composer**: pick one of the 3 built-in templates or write a custom message. Use `[Name]` anywhere in the text and it's substituted with each recipient's actual name at send time — so one message personalizes itself across everyone selected.
+- **Drafts**: **💾 Save Draft** stores the current message (prompts for a short name); the **Saved Drafts** dropdown reloads it later. Backed by the `sms_drafts` table via `/api/sms?kind=drafts`.
+- **Recipients**: a scrollable checklist of every engineer (name + phone), with quick-select buttons — **Select All**, **Select Not Voted**, **Select Confirmed**, **Select Not Reachable**, **Clear All** — plus voter-status/call-status filters and a search box to narrow the list before selecting. Engineers with no phone on file are shown disabled (can't be selected). Clicking **📱 SMS** on a row in the main table, or **📱 SMS Selected** in the bulk-action bar, jumps here with just those engineers pre-selected.
+- **Sending**: **📤 Send to Selected** sends one request per recipient (not one bulk-array call) — this is deliberate, since it's what makes per-recipient `[Name]` personalization possible and drives the live "Sending: X/Y" progress bar. Up to 3 sends run concurrently. A result summary (✅ sent / ❌ failed / ⚠️ no usable phone) appears when it finishes.
+- **Phone normalization**: your voter register has mixed formats (`"0703-142385"`, `"0712345678"`, etc.) — `toSozuriMsisdn()` in `api/sms.js` normalizes every number to bare-digit `254...` form (no `+`, per Sozuri's expected format) before sending. Numbers it can't confidently parse are logged as `invalid_phone` and skipped rather than guessed at.
+- **SMS Log**: every send attempt (sent/failed/invalid_phone) is logged inline at the bottom of the section, and per-engineer in the **Details** modal's history timeline alongside calls and remarks.
+- **Credits**: the **💰 Credits** badge at the top of the section calls `?kind=balance`, a best-effort account-balance lookup (see the unverified-contract warning — if Sozuri's balance endpoint path turns out to differ, this shows "—" instead of breaking anything else).
+
+### Two-way SMS (replies)
+
+`api/sms-reply.js` is a webhook endpoint — point Sozuri's inbound-SMS/webhook setting (check their dashboard for the exact field) at `https://<your-domain>/api/sms-reply`. When someone replies:
+
+- The raw reply is always logged to `sms_replies`, matched to an engineer by phone number if possible (last 9 digits, tolerant of format differences).
+- If the reply contains **YES** or **VOTE** (case-insensitive) and that engineer isn't already `confirmed`, it auto-logs a `contact_calls` row (caller: "SMS Reply (Auto)") and updates `contact_status` to `confirmed` — exactly like a real call would, so it shows up in Analytics/Urgent/Agenda automatically.
+- **💬 View Replies** in the SMS Log area shows the raw inbox, including unmatched numbers and which replies triggered an auto-confirm.
+- Like the send path, the exact inbound payload shape Sozuri POSTs is unverified — `extractPhoneAndMessage()` in `api/sms-reply.js` tries several plausible field names. If replies aren't appearing after you configure the webhook, that function is the one to adjust.
+
+### Cost (verify current pricing yourself — this is not live data)
+
+Confirm current per-SMS pricing on your Sozuri dashboard before budgeting — I have no way to fetch live pricing. Messages over 160 characters bill as multiple SMS parts; the character counter in the composer shows this before you send.
+
+---
+
 ## API Reference
 
 All endpoints return JSON (except `/api/export`, which returns a CSV or Excel file). All mutating endpoints accept/return `Content-Type: application/json`.
@@ -225,6 +273,12 @@ All endpoints return JSON (except `/api/export`, which returns a CSV or Excel fi
 | `POST` | `/api/reset-votes` | Set every engineer's `voted` back to `false` (history is preserved) |
 | `GET` | `/api/export?type=X&format=Y` | Download a report — `type` is `engineers` (default), `stats`, `candidates`, `calls`, or `remarks`; `format` is `csv` (default) or `excel` |
 | `POST` | `/api/import` | Bulk-add engineers from CSV text — body: `{ csv: "..." }` |
+| `GET` | `/api/sms?engineerId=X` | SMS history — one engineer's, or the most recent 200 overall if omitted |
+| `POST` | `/api/sms` | Send ONE personalized SMS — body: `{ engineerId, message, sentBy }` — see [SMS Draft Center](#6-sms-draft-center-optional) |
+| `GET`/`POST`/`DELETE` | `/api/sms?kind=drafts[&id=X]` | List / save / delete saved message drafts |
+| `GET` | `/api/sms?kind=replies` | Most recent 100 inbound SMS replies |
+| `GET` | `/api/sms?kind=balance` | Best-effort Sozuri account balance (unverified contract, fails gracefully) |
+| `POST` | `/api/sms-reply` | Inbound webhook — point Sozuri's reply/webhook setting here, not called by the browser |
 | `GET` | `/api/election-status` | `{ phase, startsAt, endsAt, serverTime, testMode }` — `phase` is `before` \| `live` \| `closed` |
 | `GET` | `/api/audit-log` | Most recent 200 audit trail entries (read-only) |
 | `GET` | `/api/candidates` | List all candidates (grouped by position, sorted by votes) |
@@ -389,7 +443,11 @@ If the API can't reach the database, a red banner appears at the top with a **Re
 
 ## Security note (please read)
 
-This build intentionally does **not** include authentication — it wasn't part of the request, and bolting one on unasked would have meant inventing a login flow, session storage, and UI for it. But said plainly: **as shipped, every mutating endpoint** (`POST`/`PUT`/`DELETE` on engineers, candidates, contact-calls, remarks, reset-votes, import) **is open to anyone who can reach your deployment URL**, via `curl` or otherwise — not just through the app's buttons. For a real election with real voters, you should add one of:
+This build intentionally does **not** include authentication — it wasn't part of the request, and bolting one on unasked would have meant inventing a login flow, session storage, and UI for it. But said plainly: **as shipped, every mutating endpoint** (`POST`/`PUT`/`DELETE` on engineers, candidates, contact-calls, remarks, reset-votes, import, **and now SMS**) **is open to anyone who can reach your deployment URL**, via `curl` or otherwise — not just through the app's buttons.
+
+**`POST /api/sms` deserves its own callout, worse than the others:** the other endpoints cost you nothing to abuse and are fixable by editing a database row. SMS costs real money per message and, once sent, **cannot be un-sent** — someone finding your URL could send arbitrary text, at your expense, to all 210 real people's phones, and there's no undo. If this app's URL is anything less than fully private, this is the endpoint I'd protect first, even with something quick (see options below) rather than none at all. `POST /api/sms-reply` is lower risk (it's a webhook, not a page action, and worst case someone forges a fake reply), but it can still write `contact_status = 'confirmed'` for an engineer without a real call happening, so don't treat it as exempt from the same protection.
+
+For a real election with real voters, you should add one of:
 
 - Basic auth or an admin token check in front of the mutating endpoints (quick, but limited).
 - A real auth provider (see Vercel's Marketplace auth integrations — Clerk, Auth0, etc.) gating who can reach the admin UI at all.

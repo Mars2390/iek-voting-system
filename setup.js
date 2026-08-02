@@ -204,6 +204,44 @@ async function main() {
   await sql`CREATE INDEX IF NOT EXISTS idx_remarks_engineer_id ON remarks(engineer_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_remarks_created_at ON remarks(created_at)`;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS sms_log (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE CASCADE,
+      phone VARCHAR(20),
+      message TEXT,
+      status VARCHAR(20),
+      provider_status VARCHAR(50),
+      provider_message_id VARCHAR(120),
+      sent_by VARCHAR(100),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS sms_drafts (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(100) NOT NULL,
+      message TEXT NOT NULL,
+      created_by VARCHAR(100),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS sms_replies (
+      id SERIAL PRIMARY KEY,
+      engineer_id INTEGER REFERENCES engineers(id) ON DELETE SET NULL,
+      phone VARCHAR(20),
+      message TEXT,
+      matched_keyword VARCHAR(50),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sms_log_engineer_id ON sms_log(engineer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sms_log_created_at ON sms_log(created_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sms_replies_engineer_id ON sms_replies(engineer_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sms_replies_phone ON sms_replies(phone)`;
+
   ok("Tables created/synced! (existing engineers/votes/audit_log/candidates data is untouched)");
 
   step("Migrating contact_status values to the new vocabulary");

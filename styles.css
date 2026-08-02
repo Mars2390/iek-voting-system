@@ -982,6 +982,122 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
   border: 1.5px solid rgba(0, 122, 61, 0.3);
 }
 
+/* ---------- SMS Draft Center ---------- */
+.sms-credit-badge {
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #fff7e6;
+  border: 1.5px solid #f0c96b;
+  color: #7a5c00;
+  border-radius: 999px;
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+
+.sms-composer {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 18px;
+  background: #fbfbfc;
+}
+
+.sms-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.sms-recipients {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 18px;
+}
+
+.sms-quick-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sms-recipient-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: 12px;
+}
+
+.sms-recipient-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.86rem;
+}
+.sms-recipient-row:last-child { border-bottom: none; }
+.sms-recipient-row:hover { background: #f7f7f8; }
+.sms-recipient-row-disabled { opacity: 0.55; cursor: not-allowed; }
+
+.sms-recipient-checkbox { flex: 0 0 auto; width: 16px; height: 16px; }
+.sms-recipient-name { flex: 1 1 160px; font-weight: 600; }
+.sms-recipient-phone { flex: 0 0 auto; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.sms-send-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.sms-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 220px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.sms-progress-track {
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: 999px;
+  background: #eceef1;
+  overflow: hidden;
+}
+
+.sms-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--ke-green);
+  transition: width 150ms ease;
+}
+
+.sms-send-result {
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: #eef6f0;
+  border: 1.5px solid rgba(0, 122, 61, 0.3);
+  margin-bottom: 18px;
+}
+.sms-send-result.error {
+  background: #fdecec;
+  border-color: rgba(187, 10, 30, 0.3);
+}
+
+.sms-log-wrap { margin-top: 4px; }
+.sms-log-wrap h3 { margin: 0; font-size: 1rem; }
+
 /* ---------- Modals ---------- */
 .modal-overlay {
   position: fixed;
@@ -1034,6 +1150,20 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
   margin-bottom: 14px;
   background: #f1f2f5;
   border-radius: var(--radius-sm);
+}
+
+#smsMessage {
+  resize: vertical;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.sms-char-count {
+  display: block;
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 4px;
 }
 
 .call-status-grid {
@@ -1109,6 +1239,14 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
   .bulk-bar { flex-direction: column; align-items: stretch; }
   .bulk-bar select, .bulk-bar button { width: 100%; }
 
+  .sms-composer-actions, .sms-quick-select { flex-direction: column; align-items: stretch; }
+  .sms-composer-actions button, .sms-quick-select button { width: 100%; }
+  .sms-recipient-row { flex-wrap: wrap; }
+  .sms-recipient-phone { flex-basis: 100%; padding-left: 26px; }
+  .sms-send-row { flex-direction: column; align-items: stretch; }
+  .sms-send-row button { width: 100%; }
+  #smsLogTable, #smsRepliesTable { min-width: 480px; }
+
   .modal-overlay { padding: 10px; }
   .modal { padding: 16px; max-height: 95vh; }
   .call-status-grid { grid-template-columns: 1fr; }
@@ -1133,7 +1271,7 @@ tbody td { padding: 12px 14px; font-size: 0.88rem; vertical-align: middle; }
   .actions-cell, #toggleFormBtn, .notification-dropdown, .bell-wrap,
   .audit-panel, .connection-banner, .candidate-form, #toggleCandidateFormBtn,
   .candidate-card-actions, #analyticsSection, #urgentSection, #agendaSection,
-  .bulk-bar, .modal-overlay, .export-dropdown, .quick-nav,
+  #smsSection, .bulk-bar, .modal-overlay, .export-dropdown, .quick-nav,
   #engineersTable th:first-child, #engineersTable td:first-child { display: none !important; }
   body { background: #fff; }
   .panel { box-shadow: none; border: 1px solid #ccc; }
