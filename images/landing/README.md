@@ -1,23 +1,29 @@
 # Landing page images
 
-Drop the photos into this folder using these exact filenames — `engineer-hub.html`
-already references these paths, so nothing else needs to change once the files
-exist. Any reasonable resolution works. `.jpg` or `.webp` are both fine (keep the
-`.jpg` extension, or edit the `src` in `engineer-hub.html` if you use `.webp`).
+These are the real photos used on `engineer-hub.html`. The page references
+optimized copies in `optimized/` (resized + compressed with sharp — originals
+here are untouched, full-resolution).
 
-| Filename | Used in | Suggested source (from the 12 you shared) |
-|---|---|---|
-| `hero.jpg` | Hero, right-side frame | The tower climber installing the satellite dish (Lime Net hi-vis) |
-| `feature-profile.jpg` | "Build your profile" card | Two people reviewing mechanical drawings on a desk |
-| `feature-directory.jpg` | "Search the directory" card | Engineer at the desk with 3D CAD/piping model on screen |
-| `feature-connect.jpg` | "Connect" card | Two engineers in hi-vis reviewing a blueprint on-site |
-| `feature-verified.jpg` | "Get verified" card | Engineer in blue coveralls inspecting the electrical control panel |
-| `gallery-1.jpg` | Gallery grid | Two crew on the ship deck looking out at the horizon |
-| `gallery-2.jpg` | Gallery grid | Aerial view of the offshore oil/gas platform complex |
-| `gallery-3.jpg` | Gallery grid | Power plant cooling tower venting steam |
-| `gallery-4.jpg` | Gallery grid | Electrical transmission towers at dusk |
-| `gallery-5.jpg` | Gallery grid | Designer sketching next to a mechanical component |
-| `gallery-6.jpg` | Gallery grid | Close-up of the green steam-engine valve gear |
+| File | Used in |
+|---|---|
+| `pexels-dextarstudio-15483316.jpg` | Hero frame |
+| `pexels-shvetsa-5324972.jpg` | "Build your profile" card |
+| `pexels-thisisengineering-19895882.jpg` | "Search the directory" card |
+| `pexels-mikael-blomkvist-8961146.jpg` | "Connect" card |
+| `pexels-shameer-vayalakkad-hydrose-2602409-21812146.jpg` | "Get verified" card |
+| `pexels-alexquezada-33041841.jpg` | Gallery — Electrical & Power |
+| `pexels-aron-razif-98492360-9336590.jpg` | Gallery — Oil & Gas / Process |
+| `pexels-atmadeep-das-1776637129-28247164.jpg` | Gallery — Marine Engineering |
+| `pexels-clickerhappy-633850.jpg` | Gallery — Mechanical Engineering |
+| `pexels-e-g-439660199-29155807.jpg` | Gallery — Power & Energy |
+| `pexels-harrun-muhammad-116282236-37198875.jpg` | Gallery — Civil & Structural |
 
-Until a file exists, that slot just shows a broken-image icon — the page
-still works fine otherwise.
+Not currently used: `pexels-aron-razif-98492360-9336587.jpg` (near-duplicate of
+the platform shot above), `pexels-dothanhyb-5530437.jpg` (school computer lab —
+not visually engineering-specific), `pexels-saruhan-osmanoglu-333083161-37430039.jpg`
+(offshore vessel at sunset), `pexels-thisisengineering-3861946.jpg` (designer with
+component). All still here if you want to swap any of the six gallery slots later.
+
+To swap an image: replace the file in `optimized/` (or re-run the resize step
+against a new original) — the `<img src>` paths in `engineer-hub.html` point
+directly at filenames in `optimized/`.

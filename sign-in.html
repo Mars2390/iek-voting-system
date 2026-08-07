@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign in to Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<style>
+  .eh-stub { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--navy-950); padding: 24px; text-align: center; }
+  .eh-stub h1 { font-family: var(--font-display); font-weight: 800; font-size: 26px; color: #fff; max-width: 420px; margin: 28px 0 0; }
+  .eh-stub p { max-width: 380px; font-size: 14.5px; color: rgba(255,255,255,0.6); margin: 12px 0 0; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="eh-stub">
+    <a href="/engineer-hub.html" class="eh-brand">
+      <svg viewBox="0 0 32 32" width="34" height="34" role="img" aria-label="Engineer Hub logo">
+        <defs>
+          <linearGradient id="logo-grad" x1="4" y1="28" x2="28" y2="4" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#2d9cdb" />
+            <stop offset="1" stop-color="#27ae60" />
+          </linearGradient>
+        </defs>
+        <line x1="8" y1="24" x2="24" y2="8" stroke="url(#logo-grad)" stroke-width="2" />
+        <line x1="8" y1="24" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+        <line x1="24" y1="8" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+        <circle cx="8" cy="24" r="4" fill="#101a24" />
+        <circle cx="24" cy="8" r="4" fill="url(#logo-grad)" />
+        <circle cx="24" cy="24" r="4" fill="url(#logo-grad)" />
+      </svg>
+      <span>Engineer<em>Hub</em></span>
+    </a>
+    <h1>Sign-in isn&rsquo;t open yet</h1>
+    <p>There are no accounts to sign into yet — Engineer Hub is still in development.</p>
+    <a href="/engineer-hub.html" class="eh-btn eh-btn-ghost-dark" style="margin-top:28px;">Back to the homepage</a>
+  </div>
+</body>
+</html>
