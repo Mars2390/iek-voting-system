@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Engineer Hub — Connecting Engineers, Building Kenya</title>
+<meta name="description" content="A professional directory and network for IEK-registered engineers, graduates, and students." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+</head>
+<body>
+
+<header id="eh-nav" class="eh-nav">
+  <div class="eh-nav-row">
+    <a href="#" class="eh-brand">
+      <svg viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Engineer Hub logo">
+        <defs>
+          <linearGradient id="logo-grad" x1="4" y1="28" x2="28" y2="4" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#0d7c88" />
+            <stop offset="1" stop-color="#14969f" />
+          </linearGradient>
+        </defs>
+        <line x1="8" y1="24" x2="24" y2="8" stroke="url(#logo-grad)" stroke-width="2" />
+        <line x1="8" y1="24" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+        <line x1="24" y1="8" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+        <circle cx="8" cy="24" r="4" fill="#0e1a2e" />
+        <circle cx="24" cy="8" r="4" fill="url(#logo-grad)" />
+        <circle cx="24" cy="24" r="4" fill="url(#logo-grad)" />
+      </svg>
+      <span>Engineer<em>Hub</em></span>
+    </a>
+
+    <nav class="eh-nav-links">
+      <a href="#features">What you can do</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#gallery">The community</a>
+    </nav>
+
+    <div class="eh-nav-actions">
+      <a href="#" class="eh-signin">Sign in</a>
+      <a href="#" class="eh-btn eh-btn-primary">Join Engineer Hub</a>
+    </div>
+
+    <button id="eh-burger" class="eh-burger" type="button" aria-expanded="false" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+
+  <div id="eh-mobile-menu" class="eh-mobile-menu">
+    <nav>
+      <a href="#features">What you can do</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#gallery">The community</a>
+    </nav>
+    <div class="eh-mobile-actions">
+      <a href="#" class="eh-btn eh-btn-ghost-dark eh-btn-full">Sign in</a>
+      <a href="#" class="eh-btn eh-btn-primary eh-btn-full">Join Engineer Hub</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- Hero -->
+  <section class="eh-hero">
+    <div class="eh-hero-glow" aria-hidden="true"></div>
+    <div class="eh-wrap eh-hero-grid">
+      <div>
+        <span class="eh-badge"><span class="dot"></span>Founding cohort now open</span>
+        <h1>The professional directory built for Kenya&rsquo;s engineers.</h1>
+        <p class="eh-lede">
+          Engineer Hub is a verified directory and connection network for
+          IEK-registered engineers, graduates, and students — find people
+          by discipline, company, or IEK number, and build a profile that
+          proves who you are.
+        </p>
+        <div class="eh-hero-ctas">
+          <a href="#" class="eh-btn eh-btn-primary">
+            Join Engineer Hub
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </a>
+          <a href="#" class="eh-btn eh-btn-ghost-dark">Sign in</a>
+        </div>
+        <ul class="eh-trust-list">
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.2l2.7 2.7 6.3-6.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>Search the directory by discipline, company, or IEK number</li>
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.2l2.7 2.7 6.3-6.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>Verified badges cross-checked against the official IEK register</li>
+          <li><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.2l2.7 2.7 6.3-6.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>Built for civil, electrical, mechanical, telecoms, and marine engineers alike</li>
+        </ul>
+      </div>
+
+      <div class="eh-hero-media">
+        <div class="eh-hero-frame">
+          <img src="images/landing/hero.jpg" alt="Engineer at work in the field" />
+        </div>
+        <div class="eh-hero-blob" aria-hidden="true"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="eh-features">
+    <div class="eh-wrap">
+      <div class="eh-section-head">
+        <span class="eh-eyebrow">Phase 1</span>
+        <h2>What you can do on Engineer Hub today</h2>
+        <p>The founding release is deliberately narrow — a real directory and network, not a half-built version of everything at once.</p>
+      </div>
+
+      <div class="eh-feature-grid">
+        <div class="eh-feature-card">
+          <div class="eh-feature-media">
+            <img src="images/landing/feature-profile.jpg" alt="" />
+            <span class="eh-feature-icon teal">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12a4 4 0 100-8 4 4 0 000 8zM5 20a7 7 0 0114 0" /></svg>
+            </span>
+          </div>
+          <div class="eh-feature-body">
+            <h3>Build your profile</h3>
+            <p>Discipline, company, years of experience, and IEK number — the credentials that tell other engineers who you are.</p>
+          </div>
+        </div>
+
+        <div class="eh-feature-card">
+          <div class="eh-feature-media">
+            <img src="images/landing/feature-directory.jpg" alt="" />
+            <span class="eh-feature-icon blue">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M20 20l-4.8-4.8" /></svg>
+            </span>
+          </div>
+          <div class="eh-feature-body">
+            <h3>Search the directory</h3>
+            <p>Find engineers by name, discipline, company, or IEK number — instead of guessing who to call.</p>
+          </div>
+        </div>
+
+        <div class="eh-feature-card">
+          <div class="eh-feature-media">
+            <img src="images/landing/feature-connect.jpg" alt="" />
+            <span class="eh-feature-icon green">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15a4 4 0 010-6l3-3a4 4 0 016 6l-1 1" /><path d="M15 9a4 4 0 010 6l-3 3a4 4 0 01-6-6l1-1" /></svg>
+            </span>
+          </div>
+          <div class="eh-feature-body">
+            <h3>Connect</h3>
+            <p>Send and accept connection requests, and see who you already know in common.</p>
+          </div>
+        </div>
+
+        <div class="eh-feature-card">
+          <div class="eh-feature-media">
+            <img src="images/landing/feature-verified.jpg" alt="" />
+            <span class="eh-feature-icon amber">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.9-7 9-4-1.1-7-4.6-7-9V6l7-3zM9 12l2 2 4-4" /></svg>
+            </span>
+          </div>
+          <div class="eh-feature-body">
+            <h3>Get verified</h3>
+            <p>An admin cross-checks your IEK number against the official register — verified members get a badge on their profile.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how-it-works" class="eh-how">
+    <div class="eh-wrap">
+      <div class="eh-section-head">
+        <span class="eh-eyebrow">Onboarding</span>
+        <h2>How it works</h2>
+      </div>
+
+      <div class="eh-steps">
+        <div class="eh-step">
+          <span class="eh-step-num">1</span>
+          <div class="eh-step-card">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l8 6 8-6M4 6h16v12H4V6z" /></svg>
+            <h3>Sign up</h3>
+            <p>Create an account with your email or phone number.</p>
+          </div>
+        </div>
+        <div class="eh-step">
+          <span class="eh-step-num">2</span>
+          <div class="eh-step-card">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20a8 8 0 0116 0M12 12a4 4 0 100-8 4 4 0 000 8z" /></svg>
+            <h3>Build your profile</h3>
+            <p>Add your discipline, company, experience, and IEK number.</p>
+          </div>
+        </div>
+        <div class="eh-step">
+          <span class="eh-step-num">3</span>
+          <div class="eh-step-card">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.9-7 9-4-1.1-7-4.6-7-9V6l7-3zM9 12l2 2 4-4" /></svg>
+            <h3>Get verified</h3>
+            <p>An admin checks your IEK number against the official register.</p>
+          </div>
+        </div>
+        <div class="eh-step">
+          <span class="eh-step-num">4</span>
+          <div class="eh-step-card">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15a4 4 0 010-6l3-3a4 4 0 016 6l-1 1M15 9a4 4 0 010 6l-3 3a4 4 0 01-6-6l1-1" /></svg>
+            <h3>Start connecting</h3>
+            <p>Search the directory and send your first connection request.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gallery -->
+  <section id="gallery" class="eh-gallery">
+    <div class="eh-wrap">
+      <div class="eh-section-head">
+        <span class="eh-eyebrow">The community</span>
+        <h2>Every discipline, one directory</h2>
+        <p>Civil, electrical, mechanical, telecoms, marine — Engineer Hub is built for the full range of IEK-registered disciplines.</p>
+      </div>
+
+      <div class="eh-gallery-grid">
+        <div class="eh-gallery-item wide"><img src="images/landing/gallery-1.jpg" alt="Marine engineers on deck" /></div>
+        <div class="eh-gallery-item"><img src="images/landing/gallery-2.jpg" alt="Offshore platform complex" /></div>
+        <div class="eh-gallery-item"><img src="images/landing/gallery-3.jpg" alt="Power plant cooling tower" /></div>
+        <div class="eh-gallery-item"><img src="images/landing/gallery-4.jpg" alt="Electrical transmission towers" /></div>
+        <div class="eh-gallery-item"><img src="images/landing/gallery-5.jpg" alt="Product design sketch and component" /></div>
+        <div class="eh-gallery-item"><img src="images/landing/gallery-6.jpg" alt="Close-up of mechanical engine components" /></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA banner -->
+  <section class="eh-cta-section">
+    <div class="eh-cta-banner">
+      <div class="eh-cta-glow" aria-hidden="true"></div>
+      <h2>Be part of the founding cohort.</h2>
+      <p>Build your profile, get verified, and find the engineers you already know — from day one of the directory.</p>
+      <div class="eh-cta-actions">
+        <a href="#" class="eh-btn eh-btn-solid-light">Join Engineer Hub</a>
+        <a href="#" class="eh-btn eh-btn-ghost-dark">Sign in</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="eh-footer">
+  <div class="eh-footer-row">
+    <div class="eh-footer-brand">
+      <a href="#" class="eh-brand">
+        <svg viewBox="0 0 32 32" width="28" height="28" role="img" aria-label="Engineer Hub logo">
+          <line x1="8" y1="24" x2="24" y2="8" stroke="url(#logo-grad)" stroke-width="2" />
+          <line x1="8" y1="24" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+          <line x1="24" y1="8" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+          <circle cx="8" cy="24" r="4" fill="#0e1a2e" />
+          <circle cx="24" cy="8" r="4" fill="url(#logo-grad)" />
+          <circle cx="24" cy="24" r="4" fill="url(#logo-grad)" />
+        </svg>
+        <span>Engineer<em>Hub</em></span>
+      </a>
+      <p>Connecting Engineers, Building Kenya. An independent directory and network for IEK-affiliated engineers, graduates, and students — not an official IEK product.</p>
+    </div>
+
+    <nav class="eh-footer-links">
+      <a href="#features">What you can do</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#gallery">The community</a>
+      <a href="#">Sign in</a>
+    </nav>
+  </div>
+
+  <div class="eh-footer-bottom eh-wrap">
+    <p>&copy; <span id="eh-year"></span> Engineer Hub.</p>
+  </div>
+</footer>
+
+<script>document.getElementById("eh-year").textContent = new Date().getFullYear();</script>
+<script src="engineer-hub.js"></script>
+</body>
+</html>
