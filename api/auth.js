@@ -23,6 +23,17 @@ import { applyCors, sendError } from "./_utils.js";
 const SESSION_DAYS = 30;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB
 
+// Vercel's (req, res)-style Node functions only auto-parse req.body for
+// application/json, application/x-www-form-urlencoded, and text/plain —
+// for anything else (image/jpeg etc.) req.body is left unset, so photo
+// uploads have to read the raw request stream themselves.
+async function readRawBody(req) {
+  if (Buffer.isBuffer(req.body)) return req.body;
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
 function digitsOnly(value) {
   return String(value || "").replace(/[^0-9]/g, "");
 }
@@ -250,8 +261,8 @@ export default async function handler(req, res) {
       if (!contentType.startsWith("image/")) {
         return res.status(400).json({ error: "Only image uploads are allowed." });
       }
-      const body = req.body;
-      if (!Buffer.isBuffer(body) || body.length === 0) {
+      const body = await readRawBody(req);
+      if (!body.length) {
         return res.status(400).json({ error: "No image data received." });
       }
       if (body.length > MAX_PHOTO_BYTES) {
