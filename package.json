@@ -11,7 +11,8 @@
     "start": "vercel dev"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.2"
+    "@neondatabase/serverless": "^1.0.2",
+    "@vercel/blob": "^2.7.0"
   },
   "keywords": [
     "iek",

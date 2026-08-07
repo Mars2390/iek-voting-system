@@ -1,0 +1,141 @@
+/* ============ Shared app-page primitives (directory/connections/jobs/feed/profile/settings) ============ */
+
+.hub-main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 80px; }
+
+/* Page-top banner with a real photo background + dark scrim */
+.hub-banner {
+  position: relative;
+  overflow: hidden;
+  padding: 44px 0;
+  background: var(--black);
+}
+.hub-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.55; }
+.hub-banner::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(100deg, rgba(10,10,10,0.92) 20%, rgba(10,10,10,0.6) 70%);
+}
+.hub-banner-inner { position: relative; max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+.hub-banner .eh-eyebrow { color: var(--green-500, #34c471); }
+.hub-banner h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  color: #fff;
+  margin: 8px 0 0;
+}
+.hub-banner p { margin: 6px 0 0; color: rgba(255,255,255,0.7); font-size: 14.5px; max-width: 56ch; }
+
+/* Avatar: photo, or initials fallback */
+.hub-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; overflow: hidden; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--red-600), var(--green-600));
+  color: #fff; font-family: var(--font-display); font-weight: 800;
+}
+.hub-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.hub-avatar.sz-sm { width: 36px; height: 36px; font-size: 13px; }
+.hub-avatar.sz-md { width: 52px; height: 52px; font-size: 17px; }
+.hub-avatar.sz-lg { width: 96px; height: 96px; font-size: 30px; border: 4px solid var(--surface); }
+.hub-avatar.sz-xl { width: 136px; height: 136px; font-size: 42px; border: 5px solid var(--surface); }
+
+.hub-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.hub-tag {
+  display: inline-flex; align-items: center;
+  font-size: 12.5px; font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+.hub-tag.removable { gap: 6px; padding-right: 8px; }
+.hub-tag .rm { cursor: pointer; color: var(--ink-muted); font-weight: 700; }
+.hub-tag .rm:hover { color: var(--red-600); }
+
+.hub-empty {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--ink-muted);
+  font-size: 14.5px;
+}
+.hub-empty .big { font-size: 32px; margin-bottom: 8px; opacity: 0.4; }
+
+.hub-loading { text-align: center; padding: 60px 20px; color: var(--ink-muted); font-size: 14.5px; }
+
+/* Directory / suggestions card grid */
+.hub-people-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 640px) { .hub-people-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 960px) { .hub-people-grid { grid-template-columns: repeat(3, 1fr); } }
+
+.hub-person-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  text-align: center;
+  transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease), border-color 0.25s;
+}
+.hub-person-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: var(--red-600); }
+.hub-person-card .hub-avatar { margin: 0 auto; }
+.hub-person-card h3 { margin: 12px 0 0; font-size: 15px; font-weight: 700; color: var(--ink); }
+.hub-person-card .role { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-muted); }
+.hub-person-card .badge-row { margin: 8px 0 0; display: flex; justify-content: center; }
+
+.hub-verified-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; color: var(--green-600);
+  background: var(--green-100); padding: 3px 9px; border-radius: 999px;
+}
+
+/* Filter bar */
+.hub-filterbar {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  margin-bottom: 24px;
+}
+.hub-filterbar input[type="text"], .hub-filterbar select {
+  font-family: var(--font-body); font-size: 14px;
+  padding: 10px 14px; border-radius: 10px; border: 1.5px solid var(--border);
+  background: var(--surface); color: var(--ink); outline: none;
+}
+.hub-filterbar input[type="text"] { flex: 1; min-width: 200px; }
+.hub-filterbar input:focus, .hub-filterbar select:focus { border-color: var(--red-600); box-shadow: 0 0 0 3px var(--red-100); }
+
+/* Feed / list items */
+.hub-list { display: flex; flex-direction: column; gap: 12px; }
+.hub-feed-item { display: flex; gap: 12px; padding: 14px 4px; border-bottom: 1px solid var(--border); }
+.hub-feed-item:last-child { border-bottom: none; }
+.hub-feed-item p { margin: 0; font-size: 14px; color: var(--ink); }
+.hub-feed-item time { font-size: 12px; color: var(--ink-muted); }
+
+.hub-req-row { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.hub-req-row:last-child { border-bottom: none; }
+.hub-req-info { flex: 1; min-width: 0; }
+.hub-req-info h4 { margin: 0; font-size: 14.5px; font-weight: 700; }
+.hub-req-info p { margin: 2px 0 0; font-size: 13px; color: var(--ink-muted); }
+.hub-req-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.hub-btn-sm { padding: 8px 16px; font-size: 13px; }
+
+/* Job cards */
+.hub-job-card { padding: 22px; }
+.hub-job-card h3 { margin: 0; font-size: 16.5px; font-weight: 700; }
+.hub-job-card .meta { margin: 4px 0 0; font-size: 13px; color: var(--ink-muted); }
+.hub-job-card .desc { margin: 12px 0 0; font-size: 13.5px; color: var(--ink); line-height: 1.6; }
+.hub-job-card .foot { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hub-job-card .posted-by { font-size: 12px; color: var(--ink-muted); }
+
+/* Tab pills */
+.hub-tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.hub-tab {
+  padding: 10px 4px; margin-right: 20px;
+  font-size: 14px; font-weight: 600; color: var(--ink-muted);
+  border-bottom: 2px solid transparent; cursor: pointer; background: none; border-left: none; border-right: none; border-top: none;
+}
+.hub-tab.is-active { color: var(--ink); border-bottom-color: var(--red-600); }

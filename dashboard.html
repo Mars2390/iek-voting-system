@@ -3,103 +3,71 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Your profile — Engineer Hub</title>
+<title>Dashboard — Engineer Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="engineer-hub.css" />
 <link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
 </head>
 <body>
 
-<header class="db-nav">
-  <div class="db-nav-row">
-    <a href="/" class="eh-brand">
-      <span class="eh-brand-mark">
-        <svg viewBox="0 0 32 32" width="22" height="22" role="img" aria-label="Engineer Hub logo">
-          <defs>
-            <linearGradient id="logo-grad" x1="4" y1="28" x2="28" y2="4" gradientUnits="userSpaceOnUse">
-              <stop offset="0" stop-color="#bb0a1e" />
-              <stop offset="1" stop-color="#007a3d" />
-            </linearGradient>
-          </defs>
-          <line x1="8" y1="24" x2="24" y2="8" stroke="url(#logo-grad)" stroke-width="2" />
-          <line x1="8" y1="24" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
-          <line x1="24" y1="8" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
-          <circle cx="8" cy="24" r="4" fill="#101a24" />
-          <circle cx="24" cy="8" r="4" fill="url(#logo-grad)" />
-          <circle cx="24" cy="24" r="4" fill="url(#logo-grad)" />
-        </svg>
-      </span>
-      <span class="eh-brand-text">
-        <span class="name">Engineer<em>Hub</em></span>
-      </span>
-    </a>
-    <div class="db-nav-actions">
-      <a href="/voting.html" class="db-link">Voting Dashboard</a>
-      <button id="db-logout" type="button" class="eh-btn eh-btn-ghost-dark db-logout-btn">Logout</button>
+<div id="app-nav" data-active="dashboard"></div>
+
+<main class="hub-page">
+  <div id="db-loading" class="hub-loading" style="padding-top:80px;">Loading your dashboard…</div>
+
+  <div id="db-content" class="hub-main" hidden>
+    <h1 id="db-welcome" class="db-welcome">Welcome back!</h1>
+    <p class="db-sub">Here's what's happening with your Engineer Hub profile.</p>
+
+    <div class="db-stat-row">
+      <div class="hub-card db-stat-card">
+        <span class="db-stat-num" id="db-stat-completion">0%</span>
+        <span class="db-stat-label">Profile completion</span>
+        <div class="db-progress"><div id="db-progress-bar" class="db-progress-bar" style="width:0%"></div></div>
+      </div>
+      <div class="hub-card db-stat-card">
+        <span class="db-stat-num" id="db-stat-connections">0</span>
+        <span class="db-stat-label">Connections</span>
+      </div>
+      <div class="hub-card db-stat-card">
+        <span class="db-stat-num" id="db-stat-pending">0</span>
+        <span class="db-stat-label">Pending requests</span>
+      </div>
     </div>
-  </div>
-</header>
 
-<main class="db-main">
-  <div id="db-loading" class="db-loading">Loading your profile…</div>
-
-  <div id="db-content" class="eh-wrap db-content" hidden>
-    <h1 id="db-welcome">Welcome back!</h1>
-    <p class="db-sub">This is your Engineer Hub profile.</p>
-
-    <div class="db-grid">
-      <section class="db-card">
-        <div class="db-card-head">
-          <h2>Your profile</h2>
-          <button id="db-edit-toggle" type="button" class="db-edit-btn">Edit profile</button>
-        </div>
-
-        <dl id="db-profile-view" class="db-profile-list">
-          <div class="db-row"><dt>Full name</dt><dd id="db-field-name">—</dd></div>
-          <div class="db-row"><dt>Membership number</dt><dd id="db-field-iek">—</dd></div>
-          <div class="db-row"><dt>Discipline</dt><dd id="db-field-discipline">—</dd></div>
-          <div class="db-row"><dt>Company</dt><dd id="db-field-company">—</dd></div>
-          <div class="db-row"><dt>Phone</dt><dd id="db-field-phone">—</dd></div>
-          <div class="db-row"><dt>Status</dt><dd><span class="db-badge">Verified — matched to official IEK register</span></dd></div>
-        </dl>
-
-        <form id="db-edit-form" class="db-edit-form" hidden>
-          <label class="lg-field">
-            <span>Full name</span>
-            <input type="text" id="db-input-name" name="displayName" />
-          </label>
-          <label class="lg-field">
-            <span>Discipline</span>
-            <input type="text" id="db-input-discipline" name="discipline" placeholder="e.g. Electrical Engineering" />
-          </label>
-          <label class="lg-field">
-            <span>Company</span>
-            <input type="text" id="db-input-company" name="company" placeholder="e.g. Kenya Power" />
-          </label>
-          <div id="db-edit-error" class="lg-error" hidden></div>
-          <div class="db-edit-actions">
-            <button type="submit" class="eh-btn eh-btn-primary">Save changes</button>
-            <button type="button" id="db-edit-cancel" class="eh-btn eh-btn-ghost-light">Cancel</button>
+    <div class="db-grid2">
+      <div>
+        <section class="hub-card" style="margin-bottom:20px;">
+          <h2 class="db-section-h">Quick actions</h2>
+          <div class="db-actions">
+            <a href="/profile.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Edit profile</a>
+            <a href="/directory.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Find engineers</a>
+            <a href="/jobs.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Browse jobs</a>
+            <a href="/feed.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">View feed</a>
           </div>
-        </form>
-      </section>
+        </section>
 
-      <aside class="db-side">
-        <a href="/voting.html" class="db-side-card">
-          <h3>Voting Dashboard</h3>
-          <p>Turnout tracking and the IEK election tools.</p>
-        </a>
-        <a href="/" class="db-side-card">
-          <h3>Engineer Hub</h3>
-          <p>Back to the public landing page.</p>
-        </a>
+        <section class="hub-card">
+          <h2 class="db-section-h">Recent activity</h2>
+          <div id="db-activity" class="hub-list"></div>
+        </section>
+      </div>
+
+      <aside>
+        <section class="hub-card">
+          <h2 class="db-section-h">Engineers you may know</h2>
+          <div id="db-suggestions" class="db-suggestions"></div>
+        </section>
       </aside>
     </div>
   </div>
 </main>
 
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
 <script src="dashboard.js"></script>
 </body>
 </html>

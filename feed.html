@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Feed — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="feed"></div>
+
+<section class="hub-banner">
+  <img src="images/landing/optimized/pexels-clickerhappy-633850.jpg" alt="" />
+  <div class="hub-banner-inner">
+    <span class="eh-eyebrow">What's happening</span>
+    <h1>Activity feed</h1>
+    <p>Recent moves across the Engineer Hub community.</p>
+  </div>
+</section>
+
+<main class="hub-main" style="max-width: 720px;">
+  <div id="feed-list" class="hub-card"><div class="hub-loading">Loading…</div></div>
+</main>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="feed.js"></script>
+</body>
+</html>

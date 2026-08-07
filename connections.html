@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Connections — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="connections"></div>
+
+<section class="hub-banner">
+  <img src="images/landing/optimized/pexels-mikael-blomkvist-8961146.jpg" alt="" />
+  <div class="hub-banner-inner">
+    <span class="eh-eyebrow">Your network</span>
+    <h1>Connections</h1>
+    <p>People you know, and requests waiting on you.</p>
+  </div>
+</section>
+
+<main class="hub-main">
+  <div class="hub-tabs">
+    <button class="hub-tab is-active" data-tab="connections">My Connections <span id="tab-count-connections"></span></button>
+    <button class="hub-tab" data-tab="incoming">Requests <span id="tab-count-incoming"></span></button>
+    <button class="hub-tab" data-tab="outgoing">Pending <span id="tab-count-outgoing"></span></button>
+  </div>
+
+  <div id="panel-connections" class="hub-card"><div class="hub-loading">Loading…</div></div>
+  <div id="panel-incoming" class="hub-card" hidden></div>
+  <div id="panel-outgoing" class="hub-card" hidden></div>
+</main>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="connections.js"></script>
+</body>
+</html>

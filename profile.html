@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Profile — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="profile.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="dashboard"></div>
+
+<main class="hub-page" id="pf-loading-wrap">
+  <div class="hub-loading">Loading profile…</div>
+</main>
+
+<main class="hub-page" id="pf-content" hidden>
+  <div class="pf-cover" id="pf-cover">
+    <img id="pf-cover-img" src="" alt="" hidden />
+    <button id="pf-cover-edit" class="pf-cover-edit-btn" type="button" hidden>Change cover</button>
+    <input id="pf-cover-input" type="file" accept="image/*" hidden />
+  </div>
+
+  <div class="hub-main pf-header">
+    <div class="pf-avatar-wrap">
+      <span id="pf-avatar" class="hub-avatar sz-xl"></span>
+      <button id="pf-avatar-edit" class="pf-avatar-edit-btn" type="button" hidden aria-label="Change profile photo">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h4l2-3h4l2 3h4v13H4V7z" /><circle cx="12" cy="13" r="4" /></svg>
+      </button>
+      <input id="pf-avatar-input" type="file" accept="image/*" hidden />
+    </div>
+
+    <div class="pf-header-info">
+      <div class="pf-header-top">
+        <div>
+          <h1 id="pf-name">—</h1>
+          <p id="pf-title" class="pf-title"></p>
+          <p class="pf-meta">
+            <span class="hub-verified-badge">Verified — <span id="pf-iek"></span></span>
+            <span id="pf-location-company"></span>
+          </p>
+        </div>
+        <div class="pf-header-actions" id="pf-header-actions"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hub-main pf-grid">
+    <div class="pf-col-main">
+
+      <section class="hub-card pf-section">
+        <div class="pf-section-head">
+          <h2>About</h2>
+          <button id="pf-about-edit-btn" class="pf-edit-link" type="button" hidden>Edit</button>
+        </div>
+        <p id="pf-bio-view" class="pf-bio">—</p>
+        <form id="pf-about-form" hidden>
+          <label class="lg-field">
+            <span>Bio</span>
+            <textarea id="pf-input-bio" rows="4" style="width:100%;font-family:var(--font-body);font-size:14px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--ink);"></textarea>
+          </label>
+          <div class="pf-form-actions">
+            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
+            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="hub-card pf-section">
+        <div class="pf-section-head">
+          <h2>Experience</h2>
+          <button id="pf-exp-add-btn" class="pf-edit-link" type="button" hidden>+ Add</button>
+        </div>
+        <div id="pf-exp-list" class="pf-entry-list"></div>
+        <form id="pf-exp-form" class="pf-entry-form" hidden>
+          <input type="hidden" id="pf-exp-id" />
+          <label class="lg-field"><span>Job title</span><input type="text" id="pf-exp-title" required /></label>
+          <label class="lg-field"><span>Company</span><input type="text" id="pf-exp-company" required /></label>
+          <div class="pf-form-row">
+            <label class="lg-field"><span>Start date</span><input type="date" id="pf-exp-start" /></label>
+            <label class="lg-field"><span>End date</span><input type="date" id="pf-exp-end" /></label>
+          </div>
+          <label class="pf-checkbox"><input type="checkbox" id="pf-exp-current" /> I currently work here</label>
+          <label class="lg-field"><span>Description</span><textarea id="pf-exp-desc" rows="3" style="width:100%;font-family:var(--font-body);font-size:14px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--ink);"></textarea></label>
+          <div class="pf-form-actions">
+            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
+            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="hub-card pf-section">
+        <div class="pf-section-head">
+          <h2>Education</h2>
+          <button id="pf-edu-add-btn" class="pf-edit-link" type="button" hidden>+ Add</button>
+        </div>
+        <div id="pf-edu-list" class="pf-entry-list"></div>
+        <form id="pf-edu-form" class="pf-entry-form" hidden>
+          <input type="hidden" id="pf-edu-id" />
+          <label class="lg-field"><span>Institution</span><input type="text" id="pf-edu-institution" required /></label>
+          <label class="lg-field"><span>Degree</span><input type="text" id="pf-edu-degree" required /></label>
+          <label class="lg-field"><span>Field of study</span><input type="text" id="pf-edu-field" /></label>
+          <div class="pf-form-row">
+            <label class="lg-field"><span>Start year</span><input type="number" id="pf-edu-start" min="1950" max="2100" /></label>
+            <label class="lg-field"><span>End year</span><input type="number" id="pf-edu-end" min="1950" max="2100" /></label>
+          </div>
+          <div class="pf-form-actions">
+            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
+            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="hub-card pf-section">
+        <h2>Skills</h2>
+        <div id="pf-skills-list" class="pf-skills"></div>
+        <form id="pf-skill-form" class="pf-skill-form" hidden>
+          <input type="text" id="pf-skill-input" placeholder="e.g. Structural Design" maxlength="80" />
+          <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Add</button>
+        </form>
+      </section>
+
+    </div>
+
+    <aside class="pf-col-side">
+      <section class="hub-card pf-section">
+        <div class="pf-section-head">
+          <h2>Contact</h2>
+          <button id="pf-contact-edit-btn" class="pf-edit-link" type="button" hidden>Edit</button>
+        </div>
+        <dl id="pf-contact-view" class="pf-contact-list"></dl>
+        <form id="pf-contact-form" hidden>
+          <label class="lg-field"><span>Email</span><input type="email" id="pf-input-email" /></label>
+          <label class="lg-field"><span>LinkedIn URL</span><input type="url" id="pf-input-linkedin" /></label>
+          <label class="lg-field"><span>GitHub URL</span><input type="url" id="pf-input-github" /></label>
+          <label class="lg-field"><span>Portfolio URL</span><input type="url" id="pf-input-portfolio" /></label>
+          <div class="pf-form-actions">
+            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
+            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="hub-card pf-section" id="pf-details-card">
+        <div class="pf-section-head">
+          <h2>Details</h2>
+          <button id="pf-details-edit-btn" class="pf-edit-link" type="button" hidden>Edit</button>
+        </div>
+        <dl id="pf-details-view" class="pf-contact-list"></dl>
+        <form id="pf-details-form" hidden>
+          <label class="lg-field"><span>Full name</span><input type="text" id="pf-input-name" /></label>
+          <label class="lg-field"><span>Title</span><input type="text" id="pf-input-title" placeholder="e.g. Civil Engineer" /></label>
+          <label class="lg-field"><span>Discipline</span><input type="text" id="pf-input-discipline" /></label>
+          <label class="lg-field"><span>Company</span><input type="text" id="pf-input-company" /></label>
+          <label class="lg-field"><span>Location</span><input type="text" id="pf-input-location" /></label>
+          <label class="lg-field"><span>Years of experience</span><input type="number" id="pf-input-years" min="0" max="70" /></label>
+          <div class="pf-form-actions">
+            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
+            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="profile.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+.pf-cover {
+  position: relative;
+  height: 200px;
+  background: linear-gradient(120deg, var(--black) 0%, var(--red-700) 60%, var(--green-700) 130%);
+  overflow: hidden;
+}
+.pf-cover img { width: 100%; height: 100%; object-fit: cover; }
+.pf-cover-edit-btn {
+  position: absolute; right: 16px; bottom: 16px;
+  background: rgba(10,10,10,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 999px; padding: 7px 16px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.pf-cover-edit-btn:hover { background: rgba(10,10,10,0.75); }
+
+.pf-header { padding-top: 0; margin-top: -56px; position: relative; display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
+.pf-avatar-wrap { position: relative; flex-shrink: 0; }
+.pf-avatar-edit-btn {
+  position: absolute; right: 2px; bottom: 2px;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--red-600); color: #fff; border: 2px solid var(--surface);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.pf-avatar-edit-btn:hover { background: var(--red-500); }
+
+.pf-header-info { flex: 1; min-width: 240px; padding-bottom: 6px; }
+.pf-header-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+#pf-name { font-family: var(--font-display); font-weight: 800; font-size: clamp(1.4rem, 3vw, 1.9rem); color: var(--ink); margin: 0; }
+.pf-title { margin: 2px 0 0; font-size: 15px; color: var(--ink-muted); font-weight: 600; }
+.pf-meta { margin: 8px 0 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--ink-muted); }
+.pf-header-actions { display: flex; gap: 10px; padding-bottom: 4px; }
+
+.pf-grid { margin-top: 24px; display: grid; grid-template-columns: 1fr; gap: 20px; }
+.pf-col-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.pf-col-side { display: flex; flex-direction: column; gap: 20px; }
+
+.pf-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.pf-section h2 { margin: 0 0 10px; font-size: 16px; font-weight: 700; color: var(--ink); }
+.pf-edit-link { font-size: 13px; font-weight: 700; color: var(--red-600); background: none; border: none; cursor: pointer; }
+.pf-edit-link:hover { color: var(--red-500); }
+
+.pf-bio { font-size: 14px; color: var(--ink); line-height: 1.65; white-space: pre-line; margin: 0; }
+.pf-bio.is-empty { color: var(--ink-muted); font-style: italic; }
+
+.pf-entry-list { display: flex; flex-direction: column; }
+.pf-entry {
+  padding: 14px 0; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; gap: 12px;
+}
+.pf-entry:last-child { border-bottom: none; }
+.pf-entry h4 { margin: 0; font-size: 14.5px; font-weight: 700; color: var(--ink); }
+.pf-entry .sub { margin: 2px 0 0; font-size: 13px; color: var(--ink-muted); }
+.pf-entry .dates { margin: 2px 0 0; font-size: 12px; color: var(--ink-muted); font-family: var(--font-body); }
+.pf-entry .desc { margin: 8px 0 0; font-size: 13.5px; color: var(--ink); line-height: 1.55; }
+.pf-entry-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.pf-entry-actions button { background: none; border: none; cursor: pointer; color: var(--ink-muted); font-size: 12px; font-weight: 600; }
+.pf-entry-actions button:hover { color: var(--red-600); }
+
+.pf-entry-form { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.pf-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pf-form-actions { display: flex; gap: 10px; margin-top: 4px; }
+.pf-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink); margin-bottom: 14px; }
+.pf-cancel {}
+
+.pf-skills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.pf-skill-form { display: none; gap: 8px; margin-top: 12px; }
+.pf-skill-form.is-open { display: flex; }
+.pf-skill-form input {
+  flex: 1; font-family: var(--font-body); font-size: 14px;
+  padding: 9px 14px; border-radius: 10px; border: 1.5px solid var(--border);
+  background: var(--bg); color: var(--ink); outline: none;
+}
+
+.pf-contact-list { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.pf-contact-list .row { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; }
+.pf-contact-list dt { color: var(--ink-muted); font-weight: 600; }
+.pf-contact-list dd { margin: 0; color: var(--ink); font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.pf-contact-list dd a { color: var(--red-600); }
+
+@media (min-width: 960px) {
+  .pf-grid { grid-template-columns: 2fr 1fr; }
+}

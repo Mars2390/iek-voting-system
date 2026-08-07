@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Settings — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active=""></div>
+
+<main class="hub-main hub-page" style="max-width: 640px;">
+  <h1 style="font-family:var(--font-display);font-weight:800;font-size:22px;margin:0 0 20px;">Settings</h1>
+
+  <section class="hub-card" style="margin-bottom:20px;">
+    <h2 style="margin:0 0 14px;font-size:15.5px;">Account</h2>
+    <dl class="pf-contact-list" id="settings-account"></dl>
+  </section>
+
+  <section class="hub-card" style="margin-bottom:20px;">
+    <h2 style="margin:0 0 6px;font-size:15.5px;">Security</h2>
+    <p style="font-size:13.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6;">
+      Engineer Hub logs in with your membership number only — there's no password to change.
+      If you're on a shared or public computer, sign out of every device below.
+    </p>
+    <button id="settings-logout-all" class="eh-btn eh-btn-ghost-light hub-btn-sm">Log out of all devices</button>
+  </section>
+
+  <section class="hub-card">
+    <h2 style="margin:0 0 6px;font-size:15.5px;">About this account</h2>
+    <p style="font-size:13px;color:var(--ink-muted);line-height:1.6;margin:0;">
+      Your profile is verified because your membership number is matched against the official
+      IEK register — see <a href="/">Engineer Hub</a> for how the platform works.
+    </p>
+  </section>
+</main>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>

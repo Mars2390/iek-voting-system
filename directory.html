@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Directory — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="directory"></div>
+
+<section class="hub-banner">
+  <img src="images/landing/optimized/pexels-harrun-muhammad-116282236-37198875.jpg" alt="" />
+  <div class="hub-banner-inner">
+    <span class="eh-eyebrow">The network</span>
+    <h1>Find engineers</h1>
+    <p>Search all 317 IEK-registered engineers by name, company, IEK number, or discipline.</p>
+  </div>
+</section>
+
+<main class="hub-main">
+  <div class="hub-filterbar">
+    <input type="text" id="dir-search" placeholder="Search by name, company, or IEK number…" />
+    <select id="dir-discipline"><option value="">All disciplines</option></select>
+    <select id="dir-sort">
+      <option value="name">Sort: Name</option>
+      <option value="recent">Sort: Recently active</option>
+    </select>
+  </div>
+
+  <p id="dir-count" class="dir-count"></p>
+  <div id="dir-grid" class="hub-people-grid"></div>
+  <div id="dir-loadmore-wrap" style="text-align:center;margin-top:24px;" hidden>
+    <button id="dir-loadmore" class="eh-btn eh-btn-ghost-light">Load more</button>
+  </div>
+</main>
+
+<style>
+  .dir-count { font-size: 13px; color: var(--ink-muted); margin: 0 0 16px; }
+</style>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="directory.js"></script>
+</body>
+</html>

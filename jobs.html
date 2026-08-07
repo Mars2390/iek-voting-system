@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Jobs — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="jobs"></div>
+
+<section class="hub-banner">
+  <img src="images/landing/optimized/pexels-e-g-439660199-29155807.jpg" alt="" />
+  <div class="hub-banner-inner">
+    <span class="eh-eyebrow">Opportunities</span>
+    <h1>Jobs</h1>
+    <p>Openings shared by fellow engineers — posted by members, for members.</p>
+  </div>
+</section>
+
+<main class="hub-main">
+  <div class="hub-filterbar">
+    <input type="text" id="jobs-search" placeholder="Search by title or company…" />
+    <select id="jobs-discipline"><option value="">All disciplines</option></select>
+    <button id="jobs-post-btn" class="eh-btn eh-btn-primary hub-btn-sm">+ Post a job</button>
+  </div>
+
+  <form id="jobs-form" class="hub-card" hidden style="margin-bottom:24px;">
+    <h2 style="margin:0 0 16px;font-size:16px;">Post a job</h2>
+    <div class="pf-form-row">
+      <label class="lg-field"><span>Job title</span><input type="text" id="job-title" required /></label>
+      <label class="lg-field"><span>Company</span><input type="text" id="job-company" required /></label>
+    </div>
+    <div class="pf-form-row">
+      <label class="lg-field"><span>Location</span><input type="text" id="job-location" placeholder="e.g. Nairobi, Remote" /></label>
+      <label class="lg-field"><span>Job type</span>
+        <select id="job-type">
+          <option value="">Select…</option>
+          <option>Full-time</option>
+          <option>Internship</option>
+          <option>Contract</option>
+          <option>Part-time</option>
+        </select>
+      </label>
+    </div>
+    <label class="lg-field"><span>Discipline</span><input type="text" id="job-discipline" placeholder="e.g. Electrical Engineering" /></label>
+    <label class="lg-field"><span>Description</span><textarea id="job-description" rows="4" required style="width:100%;font-family:var(--font-body);font-size:14px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--ink);"></textarea></label>
+    <div class="pf-form-row">
+      <label class="lg-field"><span>Apply URL</span><input type="url" id="job-apply-url" placeholder="https://…" /></label>
+      <label class="lg-field"><span>Or apply email</span><input type="email" id="job-apply-email" /></label>
+    </div>
+    <div id="jobs-form-error" class="lg-error" hidden></div>
+    <div class="pf-form-actions">
+      <button type="submit" class="eh-btn eh-btn-primary">Post job</button>
+      <button type="button" id="jobs-form-cancel" class="eh-btn eh-btn-ghost-light">Cancel</button>
+    </div>
+  </form>
+
+  <div id="jobs-list" class="hub-list"></div>
+</main>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="jobs.js"></script>
+</body>
+</html>
