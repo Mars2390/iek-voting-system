@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEK Online Voting System</title>
+<meta name="description" content="Institution of Engineers of Kenya — Online Voting &amp; Turnout Tracking System">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Kenyan flag strip -->
+<div class="flag-strip" aria-hidden="true">
+  <span class="stripe black"></span>
+  <span class="stripe white"></span>
+  <span class="stripe red"></span>
+  <span class="stripe white"></span>
+  <span class="stripe green"></span>
+</div>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <div class="brand">
+      <img class="brand-shield" src="/images/iek-logo.jpg" alt="IEK logo">
+      <div class="brand-text">
+        <h1>IEK Online Voting System</h1>
+        <p>Institution of Engineers of Kenya &mdash; Voter Turnout Portal</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="identity-badge" id="identityBadge" type="button" title="Click to change your name">
+        &#128100; <span id="identityName">Set your name</span>
+      </button>
+      <span class="live-badge" id="pollingBadge"><span class="dot"></span> Live</span>
+      <div class="bell-wrap">
+        <button class="bell-btn" id="notificationBell" type="button" aria-label="Notifications">
+          &#128276;
+          <span class="bell-badge" id="bellBadge" hidden>0</span>
+        </button>
+        <div class="notification-dropdown" id="notificationDropdown" hidden>
+          <span class="notification-caret" aria-hidden="true"></span>
+          <div class="notification-dropdown-header">Recent Activity</div>
+          <div id="notificationList" class="notification-list">
+            <p class="notification-empty">No activity yet.</p>
+          </div>
+        </div>
+      </div>
+      <span id="clock" class="clock"></span>
+    </div>
+  </div>
+  <nav class="quick-nav container" aria-label="Section navigation">
+    <button class="quick-nav-btn" data-target="analyticsSection" type="button">&#128202; Analytics</button>
+    <button class="quick-nav-btn" data-target="urgentSection" type="button">
+      &#128680; Urgent <span id="urgentNavBadge" class="quick-nav-badge" hidden>0</span>
+    </button>
+    <button class="quick-nav-btn" data-target="agendaSection" type="button">&#128197; Today's Agenda</button>
+    <button class="quick-nav-btn" data-target="candidatesSection" type="button">&#128499;&#65039; Candidates</button>
+    <button class="quick-nav-btn" data-target="turnoutSection" type="button">&#128203; Turnout Table</button>
+    <button class="quick-nav-btn" data-target="smsSection" type="button">&#128241; SMS Center</button>
+  </nav>
+</header>
+
+<main class="container">
+
+  <!-- Election countdown / phase banner -->
+  <section class="countdown-banner" id="countdownBanner" aria-live="polite">
+    <div class="countdown-phase-label" id="countdownPhaseLabel">Loading election status&hellip;</div>
+    <div class="countdown-clock" id="countdownClock">--</div>
+    <div class="countdown-sub" id="countdownSub"></div>
+  </section>
+
+  <!-- Statistics Dashboard -->
+  <section class="dashboard" aria-label="Voting statistics">
+    <div class="stat-card stat-black">
+      <div class="stat-icon">&#128101;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statTotal">0</span>
+        <span class="stat-label">Total Registered</span>
+      </div>
+    </div>
+    <div class="stat-card stat-green">
+      <div class="stat-icon">&#9989;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statVoted">0</span>
+        <span class="stat-label">Voted</span>
+      </div>
+    </div>
+    <div class="stat-card stat-red">
+      <div class="stat-icon">&#10060;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statNotVoted">0</span>
+        <span class="stat-label">Not Voted</span>
+      </div>
+    </div>
+    <div class="stat-card stat-white">
+      <div class="stat-icon">&#128200;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statTurnout">0%</span>
+        <span class="stat-label">Voter Turnout</span>
+      </div>
+    </div>
+    <div class="stat-card stat-amber">
+      <div class="stat-icon">&#128222;</div>
+      <div class="stat-info">
+        <span class="stat-value" id="statFollowUp">0</span>
+        <span class="stat-label">Needs Follow-up</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="turnout-bar-wrap">
+    <div class="turnout-bar-track">
+      <div class="turnout-bar-fill" id="turnoutBarFill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Analytics -->
+  <section class="panel" id="analyticsSection">
+    <div class="table-panel-header">
+      <h2>&#128202; Analytics</h2>
+      <span class="last-activity" id="lastActivity">Last activity: &mdash;</span>
+    </div>
+
+    <div class="analytics-stat-grid">
+      <div class="mini-stat"><span class="mini-stat-value" id="anaTotal">0</span><span class="mini-stat-label">Total Engineers</span></div>
+      <div class="mini-stat mini-confirmed"><span class="mini-stat-value" id="anaConfirmed">0</span><span class="mini-stat-label">&#9989; Confirmed to Vote</span></div>
+      <div class="mini-stat mini-no-answer"><span class="mini-stat-value" id="anaNoAnswer">0</span><span class="mini-stat-label">&#128222; No Answer</span></div>
+      <div class="mini-stat mini-follow-up"><span class="mini-stat-value" id="anaFollowUp">0</span><span class="mini-stat-label">&#128260; Follow-up Needed</span></div>
+      <div class="mini-stat mini-not-reachable"><span class="mini-stat-value" id="anaNotReachable">0</span><span class="mini-stat-label">&#10060; Not Reachable</span></div>
+      <div class="mini-stat mini-pending"><span class="mini-stat-value" id="anaPending">0</span><span class="mini-stat-label">&#128221; Pending</span></div>
+      <div class="mini-stat"><span class="mini-stat-value" id="anaTurnout">0%</span><span class="mini-stat-label">Voter Turnout</span></div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h3>Call Status Distribution</h3>
+        <div id="pieChart" class="chart-svg-wrap"></div>
+        <div id="pieChartLegend" class="chart-legend"></div>
+      </div>
+      <div class="chart-card">
+        <h3>Daily Call Activity (7 days)</h3>
+        <div id="barChart" class="chart-svg-wrap"></div>
+      </div>
+      <div class="chart-card">
+        <h3>Voter Confirmations Over Time (7 days)</h3>
+        <div id="lineChart" class="chart-svg-wrap"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Urgent / non-responders -->
+  <section class="panel" id="urgentSection">
+    <div class="table-panel-header">
+      <h2>&#128680; Urgent &mdash; Need to Call</h2>
+      <span id="urgentCount" class="results-count">0 flagged</span>
+    </div>
+    <p class="candidates-caption">
+      Auto-flagged: 3+ calls with no confirmation, status is Follow-up/No Answer/Not Reachable, or no remark logged in the last 2 days. Cleared automatically once confirmed or voted.
+    </p>
+    <div class="table-scroll">
+      <table id="urgentTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Calls</th>
+            <th>Last Contact</th>
+            <th>Reason</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="urgentTableBody"></tbody>
+      </table>
+    </div>
+    <div id="urgentEmpty" class="empty-state" hidden><p>&#127881; Nobody is flagged right now.</p></div>
+  </section>
+
+  <!-- Today's Agenda -->
+  <section class="panel" id="agendaSection">
+    <div class="table-panel-header">
+      <h2>&#128197; Today's Call Agenda</h2>
+      <span id="agendaCount" class="results-count">0 to call</span>
+    </div>
+    <p class="candidates-caption">
+      Priority call list: not yet confirmed, ordered by longest since last contact first.
+    </p>
+    <div class="table-scroll">
+      <table id="agendaTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Last Contact</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="agendaTableBody"></tbody>
+      </table>
+    </div>
+    <div id="agendaEmpty" class="empty-state" hidden><p>&#9989; Everyone has been reached.</p></div>
+  </section>
+
+  <!-- SMS Draft Center -->
+  <section class="panel sms-panel" id="smsSection">
+    <div class="table-panel-header">
+      <h2>&#128241; SMS Draft Center</h2>
+      <span class="sms-credit-badge" id="smsCreditBadge">&#128176; Credits: check Sozuri dashboard</span>
+    </div>
+    <p class="candidates-caption">
+      Compose a message and pick recipients below, then send. Use <code>[Name]</code> anywhere in the
+      message to personalize it per engineer &mdash; sent one-by-one via Sozuri to the phone number on file.
+    </p>
+
+    <div class="sms-composer">
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="smsTemplateSelect">Template</label>
+          <select id="smsTemplateSelect">
+            <option value="">Custom message&hellip;</option>
+            <option value="Dear [Name], voting starts Monday 6AM at IEK Headquarters. Please come and vote. Reply YES to confirm. - STARIKO">Before election &mdash; reminder + confirm</option>
+            <option value="Dear [Name], this is a reminder that voting is today at IEK Headquarters. Your vote matters! - STARIKO">Election day reminder</option>
+            <option value="Dear [Name], thank you for voting! Your participation matters. - STARIKO">Thank you for voting</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="smsDraftSelect">Saved Drafts</label>
+          <select id="smsDraftSelect">
+            <option value="">Load a saved draft&hellip;</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-field">
+        <label for="smsMessage">Message</label>
+        <textarea id="smsMessage" rows="4" maxlength="480" placeholder="Type your message... use [Name] to personalize"></textarea>
+        <span class="sms-char-count" id="smsCharCount">0 characters (1 SMS part)</span>
+      </div>
+      <div class="sms-composer-actions">
+        <button class="btn btn-outline btn-sm" id="smsSaveDraftBtn" type="button">&#128190; Save Draft</button>
+        <button class="btn btn-outline btn-sm" id="smsDeleteDraftBtn" type="button" hidden>&#128465;&#65039; Delete Loaded Draft</button>
+      </div>
+    </div>
+
+    <div class="sms-recipients">
+      <div class="table-panel-header">
+        <h3>Recipients</h3>
+        <span id="smsRecipientCount" class="results-count">0 selected</span>
+      </div>
+      <div class="sms-quick-select" role="group" aria-label="Quick recipient selection">
+        <button class="btn btn-outline btn-sm" data-sms-select="all" type="button">Select All</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="not-voted" type="button">Select Not Voted</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="confirmed" type="button">Select Confirmed</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="not_reachable" type="button">Select Not Reachable</button>
+        <button class="btn btn-outline btn-sm" data-sms-select="clear" type="button">Clear All</button>
+      </div>
+      <div class="controls-row">
+        <select id="smsVoteFilter" class="filter-select" aria-label="Filter recipients by voter status">
+          <option value="">Any voter status</option>
+          <option value="voted">Voted</option>
+          <option value="not-voted">Not Voted</option>
+        </select>
+        <select id="smsContactFilter" class="filter-select" aria-label="Filter recipients by call status">
+          <option value="">Any call status</option>
+          <option value="pending">Pending</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="no_answer">No Answer</option>
+          <option value="busy_declined">Busy/Declined</option>
+          <option value="follow_up">Follow-up Needed</option>
+          <option value="not_reachable">Not Reachable</option>
+        </select>
+        <input type="text" id="smsRecipientSearch" placeholder="Search recipients...">
+      </div>
+      <div class="sms-recipient-list" id="smsRecipientList"></div>
+    </div>
+
+    <div class="sms-send-row">
+      <button class="btn btn-primary" id="smsSendBtn" type="button">&#128228; Send to Selected</button>
+      <div class="sms-progress-wrap" id="smsProgressWrap" hidden>
+        <div class="sms-progress-track"><div class="sms-progress-fill" id="smsProgressFill"></div></div>
+        <span id="smsProgressText">Sending: 0/0</span>
+      </div>
+    </div>
+    <div class="sms-send-result" id="smsSendResult" hidden></div>
+
+    <div class="sms-log-wrap">
+      <div class="table-panel-header">
+        <h3>SMS Log</h3>
+        <button class="btn btn-outline btn-sm" id="smsRepliesToggleBtn" type="button">&#128172; View Replies</button>
+      </div>
+      <div class="table-scroll">
+        <table id="smsLogTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Engineer</th>
+              <th>Phone</th>
+              <th>Message</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="smsLogTableBody"><tr><td colspan="5">No SMS sent yet.</td></tr></tbody>
+        </table>
+      </div>
+      <div id="smsRepliesPanel" hidden>
+        <div class="table-scroll">
+          <table id="smsRepliesTable">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Engineer</th>
+                <th>Phone</th>
+                <th>Message</th>
+                <th>Auto-action</th>
+              </tr>
+            </thead>
+            <tbody id="smsRepliesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Connection error banner -->
+  <div id="connectionBanner" class="connection-banner" role="alert" hidden>
+    <span class="connection-banner-icon">&#9888;&#65039;</span>
+    <span id="connectionBannerText">Could not connect to the database.</span>
+    <button class="btn btn-outline btn-sm" id="retryConnectionBtn" type="button">Retry</button>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Controls -->
+  <section class="panel controls-panel">
+    <div class="controls-row">
+      <div class="search-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="searchInput" placeholder="Search by name, IEK number or phone...">
+      </div>
+
+      <div class="filter-group" role="group" aria-label="Filter by voted status">
+        <button class="filter-btn active" data-filter="all" type="button">All</button>
+        <button class="filter-btn" data-filter="voted" type="button">Voted</button>
+        <button class="filter-btn" data-filter="not-voted" type="button">Not Voted</button>
+      </div>
+
+      <select id="contactFilter" class="filter-select" aria-label="Filter by contact status">
+        <option value="">Any contact status</option>
+        <option value="pending">Pending</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="no_answer">No Answer</option>
+        <option value="busy_declined">Busy/Declined</option>
+        <option value="follow_up">Follow-up Needed</option>
+        <option value="not_reachable">Not Reachable</option>
+      </select>
+    </div>
+
+    <div class="controls-row controls-row-actions">
+      <button class="btn btn-primary" id="toggleFormBtn" type="button">
+        <span>&#65291;</span> Add Engineer
+      </button>
+      <button class="btn btn-secondary" id="refreshBtn" type="button">
+        <span>&#128260;</span> Refresh
+      </button>
+      <button class="btn btn-secondary" id="importCsvBtn" type="button">
+        <span>&#11014;&#65039;</span> Import CSV
+      </button>
+      <input type="file" id="importCsvInput" accept=".csv,text/csv" hidden>
+      <div class="export-dropdown-wrap">
+        <button class="btn btn-secondary" id="exportCsvBtn" type="button">
+          <span>&#11015;&#65039;</span> Export
+        </button>
+        <div class="export-dropdown" id="exportDropdown" hidden>
+          <div class="export-format-toggle" role="group" aria-label="Export file format">
+            <button class="export-format-btn active" data-format="csv" type="button">CSV</button>
+            <button class="export-format-btn" data-format="excel" type="button">Excel</button>
+          </div>
+          <button data-type="engineers" type="button">Full Voter List</button>
+          <button data-type="stats" type="button">Turnout Statistics</button>
+          <button data-type="candidates" type="button">Candidate Results</button>
+          <button data-type="calls" type="button">Call History</button>
+          <button data-type="remarks" type="button">Remarks History</button>
+          <button id="fullReportPdfBtn" type="button">&#128196; Full Report (Print / Save as PDF)</button>
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="printBtn" type="button">
+        <span>&#128424;&#65039;</span> Print
+      </button>
+      <button class="btn btn-danger" id="resetVotesBtn" type="button">
+        <span>&#8635;</span> Reset All Votes
+      </button>
+      <button class="btn btn-outline" id="auditLogBtn" type="button">
+        <span>&#128220;</span> View Audit Log
+      </button>
+    </div>
+    <div class="last-updated" id="lastUpdated"></div>
+  </section>
+
+  <!-- Bulk action bar -->
+  <section class="panel bulk-bar" id="bulkBar" hidden>
+    <span id="bulkCount" class="results-count">0 selected</span>
+    <select id="bulkStatusSelect" class="filter-select">
+      <option value="confirmed">Mark as: Called &amp; Confirmed</option>
+      <option value="no_answer">Mark as: Called - No Answer</option>
+      <option value="busy_declined">Mark as: Called - Busy/Declined</option>
+      <option value="follow_up">Mark as: Follow-up Needed</option>
+      <option value="not_reachable">Mark as: Not Reachable</option>
+      <option value="pending">Mark as: Pending</option>
+    </select>
+    <button class="btn btn-primary btn-sm" id="bulkApplyBtn" type="button">Apply to Selected</button>
+    <button class="btn btn-secondary btn-sm" id="bulkSmsBtn" type="button">&#128241; SMS Selected</button>
+    <button class="btn btn-secondary btn-sm" id="bulkExportBtn" type="button">Export Selected</button>
+    <button class="btn btn-secondary btn-sm" id="bulkPrintBtn" type="button">Print Call List</button>
+    <button class="btn btn-outline btn-sm" id="bulkClearBtn" type="button">Clear Selection</button>
+  </section>
+
+  <!-- Audit log panel -->
+  <section class="panel audit-panel" id="auditPanel" hidden>
+    <div class="table-panel-header">
+      <h2>Audit Trail</h2>
+      <button class="btn btn-outline btn-sm" id="closeAuditBtn" type="button">Close</button>
+    </div>
+    <div class="table-scroll">
+      <table id="auditTable">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Action</th>
+            <th>Engineer</th>
+            <th>IP</th>
+          </tr>
+        </thead>
+        <tbody id="auditTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Candidates & Results -->
+  <section class="panel candidates-panel" id="candidatesSection">
+    <div class="table-panel-header">
+      <h2>Candidates &amp; Results</h2>
+      <button class="btn btn-primary btn-sm" id="toggleCandidateFormBtn" type="button">+ Add Candidate</button>
+    </div>
+    <p class="candidates-caption">
+      Vote tallies per office (e.g. Honorary Treasurer). This is separate from the turnout
+      table below — marking an engineer "Voted" there does <strong>not</strong> affect these
+      counts. Use <strong>+1 Vote</strong> here as each counted ballot for that candidate is tallied.
+    </p>
+
+    <form id="candidateForm" class="candidate-form" hidden autocomplete="off">
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="candidateName">Candidate Name *</label>
+          <input type="text" id="candidateName" required placeholder="e.g. Eng. Stariko Nyamori">
+        </div>
+        <div class="form-field">
+          <label for="candidatePosition">Position *</label>
+          <input type="text" id="candidatePosition" required placeholder="e.g. Honorary Treasurer">
+        </div>
+        <div class="form-field">
+          <label for="candidatePhotoUrl">Photo URL</label>
+          <input type="text" id="candidatePhotoUrl" placeholder="e.g. /images/stariko-nyamori.jpg (optional)">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Add Candidate</button>
+        <button type="button" class="btn btn-outline" id="cancelCandidateFormBtn">Cancel</button>
+      </div>
+    </form>
+
+    <div id="candidatesGrid" class="candidates-grid"></div>
+    <div id="candidatesEmpty" class="empty-state" hidden>
+      <p>&#128203; No candidates added yet. Click "+ Add Candidate" to add the first one.</p>
+    </div>
+  </section>
+
+  <!-- Add / Edit Engineer Form -->
+  <section class="panel form-panel" id="formPanel" hidden>
+    <h2 id="formTitle">Register New Engineer</h2>
+    <form id="engineerForm" autocomplete="off">
+      <input type="hidden" id="engineerId" value="">
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="iekNumber">IEK Number *</label>
+          <input type="text" id="iekNumber" required placeholder="e.g. IEK009">
+        </div>
+        <div class="form-field">
+          <label for="fullName">Full Name *</label>
+          <input type="text" id="fullName" required placeholder="e.g. Eng. John Kamau">
+        </div>
+        <div class="form-field">
+          <label for="phone">Phone Number</label>
+          <input type="tel" id="phone" placeholder="e.g. 0712345678 (optional)">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="formSubmitBtn">Register Engineer</button>
+        <button type="button" class="btn btn-outline" id="cancelFormBtn">Cancel</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- Engineers Table -->
+  <section class="panel table-panel" id="turnoutSection">
+    <div class="table-panel-header">
+      <h2>Registered Engineers &mdash; Turnout</h2>
+      <span id="resultsCount" class="results-count">0 engineers</span>
+    </div>
+    <div class="table-scroll">
+      <table id="engineersTable">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="selectAllCheckbox" aria-label="Select all"></th>
+            <th>IEK Number</th>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Voted At</th>
+            <th>Contact</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+        </tbody>
+      </table>
+    </div>
+    <div id="emptyState" class="empty-state" hidden>
+      <p>&#128203; No engineers found. Try clearing search/filters, add an engineer, or use Import CSV to load the voter register.</p>
+    </div>
+  </section>
+
+</main>
+
+<!-- Log Call modal -->
+<div class="modal-overlay" id="callModalOverlay" hidden>
+  <div class="modal" role="dialog" aria-label="Log a call">
+    <div class="modal-header">
+      <h3>&#128222; Log Call &mdash; <span id="callModalName"></span></h3>
+      <button class="modal-close" id="callModalClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-phone" id="callModalPhone"></div>
+    <form id="callForm">
+      <input type="hidden" id="callEngineerId">
+      <div class="call-status-grid">
+        <button type="button" class="call-status-btn confirmed" data-status="confirmed">&#9989; Called &amp; Confirmed</button>
+        <button type="button" class="call-status-btn no_answer" data-status="no_answer">&#128222; No Answer</button>
+        <button type="button" class="call-status-btn busy_declined" data-status="busy_declined">&#128241; Busy/Declined</button>
+        <button type="button" class="call-status-btn follow_up" data-status="follow_up">&#128260; Follow-up Needed</button>
+        <button type="button" class="call-status-btn not_reachable" data-status="not_reachable">&#10060; Not Reachable</button>
+        <button type="button" class="call-status-btn pending" data-status="pending">&#128221; Pending</button>
+      </div>
+      <div class="form-field">
+        <label for="callNotes">Notes (optional)</label>
+        <input type="text" id="callNotes" placeholder="e.g. Will vote in the morning">
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="callSubmitBtn" disabled>Log Call</button>
+        <button type="button" class="btn btn-outline" id="callCancelBtn">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Engineer Details modal -->
+<div class="modal-overlay" id="detailsModalOverlay" hidden>
+  <div class="modal modal-wide" role="dialog" aria-label="Engineer details">
+    <div class="modal-header">
+      <h3 id="detailsModalName">Engineer Details</h3>
+      <button class="modal-close" id="detailsModalClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div id="detailsModalBody"></div>
+  </div>
+</div>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <div class="flag-strip small" aria-hidden="true">
+      <span class="stripe black"></span>
+      <span class="stripe white"></span>
+      <span class="stripe red"></span>
+      <span class="stripe white"></span>
+      <span class="stripe green"></span>
+    </div>
+    <p>&copy; <span id="year"></span> Institution of Engineers of Kenya (IEK) &mdash; Online Voting System</p>
+    <p class="footer-note">Harambee &middot; Engineering Excellence &middot; Integrity</p>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

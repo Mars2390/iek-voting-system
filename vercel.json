@@ -4,7 +4,6 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/", "destination": "/engineer-hub.html" },
     { "source": "/api/engineers/:id", "destination": "/api/engineers?id=:id" },
     { "source": "/api/candidates/:id/vote", "destination": "/api/candidates?id=:id&vote=1" },
     { "source": "/api/candidates/:id", "destination": "/api/candidates?id=:id" },
@@ -20,6 +19,12 @@
   "headers": [
     {
       "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/voting.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
       ]
