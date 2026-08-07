@@ -572,6 +572,48 @@ a { color: inherit; text-decoration: none; }
   .eh-mobile-menu { display: none !important; }
 }
 
+/* ============ Shared form fields (login + dashboard edit-profile) ============ */
+.lg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  width: 100%;
+}
+.lg-field span {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.lg-field input {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 15px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.lg-field input:focus {
+  border-color: var(--red-600);
+  box-shadow: 0 0 0 3px var(--red-100);
+}
+.lg-field small { font-size: 12px; color: var(--ink-muted); }
+
+.lg-error {
+  background: var(--red-100);
+  color: var(--red-700);
+  border: 1px solid rgba(187, 10, 30, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
 /* ============ Back to top ============ */
 .eh-top-btn {
   position: fixed; right: 22px; bottom: 22px; z-index: 40;
