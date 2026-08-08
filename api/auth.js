@@ -11,7 +11,7 @@ import { applyCors, sendError } from "./_utils.js";
 //
 // Actions: login, logout, me, update-profile, upload-photo,
 // work-experience, education, skills, directory, connections, feed,
-// jobs, dashboard.
+// jobs, profile, dashboard, toggle-open-to-work, conversations, messages.
 //
 // KNOWN GAP, documented rather than hidden (same convention as the
 // voting system's own README "Security note" and the original login
@@ -86,6 +86,7 @@ function privateEngineer(e) {
     githubUrl: e.github_url,
     portfolioUrl: e.portfolio_url,
     lastLogin: e.last_login,
+    openToWork: !!e.open_to_work,
     verified: true,
   };
 }
@@ -675,13 +676,14 @@ export default async function handler(req, res) {
       const [target] = id === session.id ? [session] : await sql`SELECT * FROM engineers WHERE id = ${id}`;
       if (!target) return res.status(404).json({ error: "Profile not found." });
 
-      const [experience, education, skills, connectionRow] = await Promise.all([
+      const [experience, education, skills, connectionRow, connCount] = await Promise.all([
         sql`SELECT * FROM work_experience WHERE engineer_id = ${id} ORDER BY is_current DESC, start_date DESC NULLS LAST`,
         sql`SELECT * FROM education WHERE engineer_id = ${id} ORDER BY end_year DESC NULLS FIRST`,
         sql`SELECT * FROM skills WHERE engineer_id = ${id} ORDER BY skill_name ASC`,
         id === session.id
           ? Promise.resolve([null])
           : sql`SELECT id, status, requester_id FROM connections WHERE (requester_id = ${session.id} AND addressee_id = ${id}) OR (requester_id = ${id} AND addressee_id = ${session.id})`,
+        sql`SELECT COUNT(*) FROM connections WHERE status = 'accepted' AND (requester_id = ${id} OR addressee_id = ${id})`,
       ]);
 
       const isSelf = id === session.id;
@@ -690,6 +692,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         engineer: isSelf ? privateEngineer(target) : publicEngineer(target),
         isSelf,
+        connectionsCount: Number(connCount[0].count),
         connectionStatus: isSelf ? null : conn ? conn.status : "none",
         connectionId: conn ? conn.id : null,
         isIncomingRequest: conn && conn.status === "pending" && conn.requester_id !== session.id,
@@ -697,6 +700,130 @@ export default async function handler(req, res) {
         education,
         skills,
       });
+    }
+
+    if (action === "toggle-open-to-work") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const [updated] = await sql`
+        UPDATE engineers SET open_to_work = NOT open_to_work, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${session.id} RETURNING *
+      `;
+      return res.status(200).json({ engineer: privateEngineer(updated) });
+    }
+
+    // =========================================================
+    // MESSAGING — restricted to accepted connections. Polling-based
+    // (messages.js re-fetches every 5s while a thread is open), not
+    // WebSocket push — true realtime would need pub/sub state shared
+    // across serverless instances (e.g. Upstash Redis), which is a
+    // lot of added infra for this message volume. Said plainly rather
+    // than calling this "real-time" and letting it be discovered.
+    // =========================================================
+    if (action === "conversations") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      const rows = await sql`
+        SELECT c.id, c.last_message_at,
+               CASE WHEN c.participant1_id = ${session.id} THEN c.participant2_id ELSE c.participant1_id END AS other_id,
+               (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_content,
+               (SELECT sender_id FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_sender_id,
+               (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id AND is_read = FALSE AND sender_id != ${session.id}) AS unread_count
+        FROM conversations c
+        WHERE c.participant1_id = ${session.id} OR c.participant2_id = ${session.id}
+        ORDER BY c.last_message_at DESC NULLS LAST
+      `;
+
+      let people = {};
+      if (rows.length) {
+        const ids = rows.map((r) => r.other_id);
+        const list = await sql`SELECT id, display_name, name, title, company, profile_photo FROM engineers WHERE id = ANY(${ids})`;
+        people = Object.fromEntries(list.map((p) => [p.id, p]));
+      }
+
+      return res.status(200).json({
+        conversations: rows.map((r) => ({
+          id: r.id,
+          otherId: r.other_id,
+          displayName: people[r.other_id]?.display_name || people[r.other_id]?.name || "Unknown",
+          title: people[r.other_id]?.title,
+          company: people[r.other_id]?.company,
+          profilePhoto: people[r.other_id]?.profile_photo,
+          lastMessage: r.last_content,
+          lastMessageIsMine: r.last_sender_id === session.id,
+          lastMessageAt: r.last_message_at,
+          unreadCount: Number(r.unread_count),
+        })),
+        totalUnread: rows.reduce((sum, r) => sum + Number(r.unread_count), 0),
+      });
+    }
+
+    if (action === "messages") {
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      if (req.method === "GET") {
+        const otherId = Number(req.query.with);
+        if (!otherId) return res.status(400).json({ error: "with= (the other engineer's id) is required." });
+
+        const lo = Math.min(session.id, otherId);
+        const hi = Math.max(session.id, otherId);
+        const [conv] = await sql`
+          SELECT * FROM conversations WHERE participant1_id = ${lo} AND participant2_id = ${hi}
+        `;
+        if (!conv) return res.status(200).json({ conversationId: null, messages: [] });
+
+        const messages = await sql`
+          SELECT id, sender_id, content, is_read, created_at FROM messages
+          WHERE conversation_id = ${conv.id} ORDER BY created_at ASC LIMIT 200
+        `;
+        sql`UPDATE messages SET is_read = TRUE WHERE conversation_id = ${conv.id} AND sender_id != ${session.id} AND is_read = FALSE`.catch(() => {});
+
+        return res.status(200).json({
+          conversationId: conv.id,
+          messages: messages.map((m) => ({ id: m.id, senderId: m.sender_id, content: m.content, isRead: m.is_read, createdAt: m.created_at, isMine: m.sender_id === session.id })),
+        });
+      }
+
+      if (req.method === "POST") {
+        const b = req.body || {};
+        const otherId = Number(b.recipientId);
+        const content = String(b.content || "").trim().slice(0, 4000);
+        if (!otherId || otherId === session.id) return res.status(400).json({ error: "Invalid recipient." });
+        if (!content) return res.status(400).json({ error: "Message can't be empty." });
+
+        const [conn] = await sql`
+          SELECT id FROM connections
+          WHERE status = 'accepted'
+            AND ((requester_id = ${session.id} AND addressee_id = ${otherId}) OR (requester_id = ${otherId} AND addressee_id = ${session.id}))
+        `;
+        if (!conn) return res.status(403).json({ error: "You can only message engineers you're connected with." });
+
+        const lo = Math.min(session.id, otherId);
+        const hi = Math.max(session.id, otherId);
+        const [conv] = await sql`
+          INSERT INTO conversations (participant1_id, participant2_id, last_message_at)
+          VALUES (${lo}, ${hi}, CURRENT_TIMESTAMP)
+          ON CONFLICT (participant1_id, participant2_id) DO UPDATE SET last_message_at = CURRENT_TIMESTAMP
+          RETURNING *
+        `;
+        const [message] = await sql`
+          INSERT INTO messages (conversation_id, sender_id, content) VALUES (${conv.id}, ${session.id}, ${content}) RETURNING *
+        `;
+        return res.status(201).json({ conversationId: conv.id, message: { id: message.id, senderId: message.sender_id, content: message.content, isRead: message.is_read, createdAt: message.created_at, isMine: true } });
+      }
+
+      res.setHeader("Allow", "GET, POST, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
     }
 
     // =========================================================
@@ -765,7 +892,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages.",
     });
   } catch (err) {
     return sendError(res, err);

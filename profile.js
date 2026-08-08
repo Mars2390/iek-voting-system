@@ -52,6 +52,21 @@
     var locCompany = [e.location, e.company].filter(Boolean).join(" · ");
     document.getElementById("pf-location-company").textContent = locCompany;
 
+    var connLink = document.getElementById("pf-connections-count");
+    connLink.textContent = state.connectionsCount + " connection" + (state.connectionsCount === 1 ? "" : "s");
+    if (state.isSelf) {
+      connLink.href = "/connections.html";
+    } else {
+      connLink.removeAttribute("href");
+      connLink.style.cursor = "default";
+    }
+
+    document.getElementById("pf-open-to-work-badge").hidden = !e.openToWork;
+
+    var otwRow = document.getElementById("pf-otw-row");
+    otwRow.hidden = !state.isSelf;
+    if (state.isSelf) document.getElementById("pf-otw-toggle").checked = !!e.openToWork;
+
     renderHeaderActions();
     renderAbout();
     renderExperience();
@@ -59,6 +74,12 @@
     renderSkills();
     renderContact();
     renderDetails();
+    renderNudges();
+
+    // "Me" should only read as active when this really is your own
+    // profile — browsing someone else's shouldn't light up that tab.
+    var meLink = document.querySelector('.db-nav-links a[href="/profile.html"]');
+    if (meLink) meLink.classList.toggle("is-active", state.isSelf);
   }
 
   function renderHeaderActions() {
@@ -66,7 +87,9 @@
     if (state.isSelf) { wrap.innerHTML = ""; return; }
     var status = state.connectionStatus;
     if (status === "accepted") {
-      wrap.innerHTML = '<span class="eh-btn eh-btn-ghost-light" style="cursor:default;">Connected ✓</span>';
+      wrap.innerHTML =
+        '<span class="eh-btn eh-btn-ghost-light" style="cursor:default;">Connected ✓</span>' +
+        '<a href="/messages.html?with=' + state.engineer.id + '" class="eh-btn eh-btn-primary hub-btn-sm">Message</a>';
     } else if (status === "pending" && state.isIncomingRequest) {
       wrap.innerHTML =
         '<button id="pf-accept-btn" class="eh-btn eh-btn-primary hub-btn-sm">Accept</button>' +
@@ -90,6 +113,50 @@
     H.api("connections", { method: "PATCH", body: { id: state.connectionId, status: status } })
       .then(function () { H.toast(status === "accepted" ? "Connected!" : "Request declined"); load(); })
       .catch(function (err) { H.toast(err.message, true); });
+  }
+
+  document.getElementById("pf-otw-toggle").addEventListener("change", function () {
+    H.api("toggle-open-to-work", { method: "POST" })
+      .then(function (data) {
+        state.engineer = data.engineer;
+        document.getElementById("pf-open-to-work-badge").hidden = !data.engineer.openToWork;
+        H.toast(data.engineer.openToWork ? "Marked as open to work" : "No longer marked open to work");
+      })
+      .catch(function (err) { H.toast(err.message, true); });
+  });
+
+  // ---------- Profile completion nudges (self only) ----------
+  function renderNudges() {
+    var wrap = document.getElementById("pf-nudges");
+    if (!state.isSelf) { wrap.hidden = true; return; }
+    var e = state.engineer;
+    var checks = [
+      [!e.bio, "Write a short bio", "#pf-about-edit-btn"],
+      [!e.title, "Add your job title", "#pf-details-edit-btn"],
+      [!e.profilePhoto, "Add a profile photo", "#pf-avatar-edit"],
+      [!state.experience.length, "Add your work experience", "#pf-exp-add-btn"],
+      [!state.education.length, "Add your education", "#pf-edu-add-btn"],
+      [!state.skills.length, "Add at least one skill", null],
+    ];
+    var missing = checks.filter(function (c) { return c[0]; });
+    if (!missing.length) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    wrap.innerHTML =
+      "<h3>Complete your profile</h3><ul>" +
+      missing
+        .map(function (c) {
+          return c[2] ? '<li><a href="' + c[2] + '" data-nudge>' + c[1] + "</a></li>" : "<li>" + c[1] + "</li>";
+        })
+        .join("") +
+      "</ul>";
+    wrap.querySelectorAll("[data-nudge]").forEach(function (a) {
+      a.addEventListener("click", function (e2) {
+        e2.preventDefault();
+        var target = document.querySelector(a.getAttribute("href"));
+        if (target) target.click();
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
   }
 
   // ---------- About ----------

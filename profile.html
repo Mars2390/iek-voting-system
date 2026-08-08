@@ -14,7 +14,7 @@
 </head>
 <body>
 
-<div id="app-nav" data-active="dashboard"></div>
+<div id="app-nav" data-active="me"></div>
 
 <main class="hub-page" id="pf-loading-wrap">
   <div class="hub-loading">Loading profile…</div>
@@ -44,12 +44,16 @@
           <p class="pf-meta">
             <span class="hub-verified-badge">Verified — <span id="pf-iek"></span></span>
             <span id="pf-location-company"></span>
+            <a href="#" id="pf-connections-count" class="pf-connections-link"></a>
+            <span id="pf-open-to-work-badge" class="pf-otw-badge" hidden>Open to work</span>
           </p>
         </div>
         <div class="pf-header-actions" id="pf-header-actions"></div>
       </div>
     </div>
   </div>
+
+  <div class="hub-main pf-nudges" id="pf-nudges" hidden></div>
 
   <div class="hub-main pf-grid">
     <div class="pf-col-main">
@@ -165,6 +169,13 @@
             <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
           </div>
         </form>
+        <div class="pf-otw-toggle-row" id="pf-otw-row" hidden>
+          <span>Open to work</span>
+          <label class="pf-switch">
+            <input type="checkbox" id="pf-otw-toggle" />
+            <span class="track"></span>
+          </label>
+        </div>
       </section>
     </aside>
   </div>

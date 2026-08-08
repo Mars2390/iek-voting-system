@@ -1,7 +1,10 @@
 // Shared authenticated app-shell nav, injected into every logged-in page
-// (dashboard, profile, directory, connections, jobs, feed, settings) so
-// the nav can't drift across 7 hand-copies of the same markup.
-// Usage: <div id="app-nav" data-active="directory"></div><script src="app-nav.js"></script>
+// so the nav can't drift across hand-copies of the same markup.
+// Usage: <div id="app-nav" data-active="home"></div><script src="app-nav.js"></script>
+//
+// Directory and Feed are intentionally not top-level nav items — they're
+// reachable from My Network and Home respectively, keeping the primary
+// nav at exactly the 5 sections: Home, My Network, Jobs, Messages, Me.
 (function () {
   "use strict";
 
@@ -10,18 +13,17 @@
   var active = mount.getAttribute("data-active") || "";
 
   var links = [
-    { key: "dashboard", href: "/dashboard.html", label: "Dashboard" },
-    { key: "directory", href: "/directory.html", label: "Directory" },
-    { key: "connections", href: "/connections.html", label: "Connections" },
+    { key: "home", href: "/dashboard.html", label: "Home" },
+    { key: "network", href: "/connections.html", label: "My Network" },
     { key: "jobs", href: "/jobs.html", label: "Jobs" },
-    { key: "feed", href: "/feed.html", label: "Feed" },
+    { key: "messages", href: "/messages.html", label: "Messages", badgeId: "nav-msg-badge" },
+    { key: "me", href: "/profile.html", label: "Me" },
   ];
 
-  var linksHtml = links
-    .map(function (l) {
-      return '<a href="' + l.href + '" class="' + (l.key === active ? "is-active" : "") + '">' + l.label + "</a>";
-    })
-    .join("");
+  function linkHtml(l, mobile) {
+    var badge = l.badgeId ? '<span id="' + l.badgeId + (mobile ? "-m" : "") + '" class="nav-badge" hidden></span>' : "";
+    return '<a href="' + l.href + '" class="' + (l.key === active ? "is-active" : "") + '">' + l.label + badge + "</a>";
+  }
 
   mount.innerHTML =
     '<header class="db-nav">' +
@@ -39,19 +41,16 @@
     '<span class="eh-brand-text"><span class="name">Engineer<em>Hub</em></span></span>' +
     "</a>" +
     '<nav class="db-nav-links">' +
-    linksHtml +
+    links.map(function (l) { return linkHtml(l, false); }).join("") +
     "</nav>" +
     '<div class="db-nav-actions">' +
-    '<a href="/profile.html" class="db-link">My Profile</a>' +
     '<a href="/settings.html" class="db-link">Settings</a>' +
     '<button id="db-logout" type="button" class="eh-btn eh-btn-ghost-dark db-logout-btn">Logout</button>' +
     "</div>" +
     '<button id="db-nav-burger" class="eh-burger" type="button" aria-expanded="false" aria-label="Toggle menu"><span></span><span></span><span></span></button>' +
     "</div>" +
     '<div id="db-mobile-menu" class="eh-mobile-menu">' +
-    '<nav>' + links.map(function (l) { return '<a href="' + l.href + '">' + l.label + "</a>"; }).join("") +
-    '<a href="/profile.html">My Profile</a><a href="/settings.html">Settings</a>' +
-    "</nav>" +
+    '<nav>' + links.map(function (l) { return linkHtml(l, true); }).join("") + '<a href="/settings.html">Settings</a></nav>' +
     '<div class="eh-mobile-actions"><button id="db-logout-mobile" type="button" class="eh-btn eh-btn-primary eh-btn-full">Logout</button></div>' +
     "</div>" +
     "</header>";
@@ -77,4 +76,27 @@
     burger.classList.toggle("is-open", isOpen);
     burger.setAttribute("aria-expanded", String(isOpen));
   });
+
+  // Unread-message badge, polled lightly so it stays current across pages.
+  var token = localStorage.getItem(STORAGE_KEY);
+  function refreshUnreadBadge() {
+    if (!token) return;
+    fetch("/api/auth?action=conversations", { headers: { Authorization: "Bearer " + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        [document.getElementById("nav-msg-badge"), document.getElementById("nav-msg-badge-m")].forEach(function (el) {
+          if (!el) return;
+          if (data.totalUnread > 0) {
+            el.textContent = data.totalUnread > 9 ? "9+" : String(data.totalUnread);
+            el.hidden = false;
+          } else {
+            el.hidden = true;
+          }
+        });
+      })
+      .catch(function () {});
+  }
+  refreshUnreadBadge();
+  setInterval(refreshUnreadBadge, 20000);
 })();

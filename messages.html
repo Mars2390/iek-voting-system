@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Messages — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="messages.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="messages"></div>
+
+<main class="msg-shell">
+  <aside class="msg-inbox">
+    <div class="msg-inbox-head">
+      <h1>Messages</h1>
+      <input type="text" id="msg-search" placeholder="Search conversations…" />
+    </div>
+    <div id="msg-conv-list" class="msg-conv-list">
+      <div class="hub-loading">Loading…</div>
+    </div>
+  </aside>
+
+  <section class="msg-thread" id="msg-thread">
+    <div class="msg-thread-empty" id="msg-thread-empty">
+      <p>Select a conversation to start messaging.</p>
+      <p class="hint">You can only message engineers you're connected with.</p>
+    </div>
+
+    <div class="msg-thread-active" id="msg-thread-active" hidden>
+      <div class="msg-thread-head">
+        <a id="msg-thread-avatar-link" href="#"><span id="msg-thread-avatar"></span></a>
+        <div>
+          <a id="msg-thread-name-link" href="#" class="msg-thread-name-link"><h2 id="msg-thread-name"></h2></a>
+          <p id="msg-thread-role" class="msg-thread-role"></p>
+        </div>
+      </div>
+      <div id="msg-thread-body" class="msg-thread-body"></div>
+      <form id="msg-send-form" class="msg-send-form">
+        <textarea id="msg-input" placeholder="Write a message…" rows="1" maxlength="4000"></textarea>
+        <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Send</button>
+      </form>
+    </div>
+  </section>
+</main>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="messages.js"></script>
+</body>
+</html>

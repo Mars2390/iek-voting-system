@@ -13,7 +13,7 @@
 </head>
 <body>
 
-<div id="app-nav" data-active="dashboard"></div>
+<div id="app-nav" data-active="home"></div>
 
 <main class="hub-page">
   <div id="db-loading" class="hub-loading" style="padding-top:80px;">Loading your dashboard…</div>
@@ -51,7 +51,10 @@
         </section>
 
         <section class="hub-card">
-          <h2 class="db-section-h">Recent activity</h2>
+          <div class="pf-section-head">
+            <h2 class="db-section-h" style="margin:0;">Recent activity</h2>
+            <a href="/feed.html" class="pf-edit-link">See all</a>
+          </div>
           <div id="db-activity" class="hub-list"></div>
         </section>
       </div>
