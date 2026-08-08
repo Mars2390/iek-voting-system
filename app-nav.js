@@ -25,7 +25,7 @@
 
   var links = [
     { key: "home", href: "/dashboard.html", label: "Home" },
-    { key: "network", href: "/connections.html", label: "My Network" },
+    { key: "network", href: "/connections.html", label: "My Network", badgeId: "nav-net-badge" },
     { key: "jobs", href: "/jobs.html", label: "Jobs" },
     { key: "messages", href: "/messages.html", label: "Messages", badgeId: "nav-msg-badge" },
     { key: "me", href: "/profile.html", label: "Me" },
@@ -120,6 +120,30 @@
       })
       .catch(function () {});
   }
+
+  // Pending-connection-request badge on My Network, same pattern.
+  function refreshNetworkBadge() {
+    if (!token) return;
+    fetch("/api/auth?action=connections", { headers: { Authorization: "Bearer " + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        var count = data.incoming ? data.incoming.length : 0;
+        [document.getElementById("nav-net-badge"), document.getElementById("nav-net-badge-t")].forEach(function (el) {
+          if (!el) return;
+          if (count > 0) {
+            el.textContent = count > 9 ? "9+" : String(count);
+            el.hidden = false;
+          } else {
+            el.hidden = true;
+          }
+        });
+      })
+      .catch(function () {});
+  }
+
   refreshUnreadBadge();
+  refreshNetworkBadge();
   setInterval(refreshUnreadBadge, 20000);
+  setInterval(refreshNetworkBadge, 20000);
 })();

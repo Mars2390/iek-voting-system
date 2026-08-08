@@ -496,19 +496,40 @@
   });
 
   // ---------- Photo uploads ----------
+  // Compress before the size check, not after — phone camera photos
+  // routinely start at 3-15MB, well over the 5MB cap, and used to be
+  // rejected outright before compression even ran. Compression brings
+  // real-world photos down to a few hundred KB, so the post-compression
+  // check almost never fires; it's just a safety net.
   function wireUpload(btnId, inputId, kind) {
+    var btn = document.getElementById(btnId);
+    var originalLabel = btn.innerHTML;
     document.getElementById(btnId).addEventListener("click", function () { document.getElementById(inputId).click(); });
     document.getElementById(inputId).addEventListener("change", function (e) {
       var file = e.target.files[0];
       if (!file) return;
-      if (file.size > 5 * 1024 * 1024) return H.toast("Image must be under 5MB", true);
-      H.api("upload-photo", { method: "POST", query: { kind: kind }, headers: { "Content-Type": file.type }, body: file })
+      btn.disabled = true;
+      var busyLabel = kind === "cover" ? "Uploading…" : "";
+      if (kind === "cover") btn.textContent = busyLabel;
+      else btn.style.opacity = "0.5";
+
+      H.compressImage(file, kind === "cover" ? 1920 : 800, 0.82)
+        .then(function (compressed) {
+          if (compressed.size > 5 * 1024 * 1024) throw new Error("Image is still too large after compression — try a different photo.");
+          return H.api("upload-photo", { method: "POST", query: { kind: kind }, headers: { "Content-Type": "image/jpeg" }, body: compressed });
+        })
         .then(function (data) {
           state.engineer = data.engineer;
           render();
           H.toast((kind === "cover" ? "Cover" : "Profile") + " photo updated");
         })
-        .catch(function (err) { H.toast(err.message, true); });
+        .catch(function (err) { H.toast(err.message, true); })
+        .finally(function () {
+          btn.disabled = false;
+          btn.style.opacity = "";
+          if (kind === "cover") btn.textContent = originalLabel;
+          e.target.value = "";
+        });
     });
   }
   wireUpload("pf-cover-edit", "pf-cover-input", "cover");

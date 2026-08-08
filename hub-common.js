@@ -75,6 +75,54 @@ window.Hub = (function () {
     return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   }
 
+  // Phone camera photos are routinely 3-15MB — well over the server's
+  // 5MB cap — and slow to upload on mobile data. Downscale + re-encode
+  // as JPEG client-side before every upload (desktop webcam/screenshot
+  // files get the same treatment; it's a no-op cost for already-small
+  // files). createImageBitmap with imageOrientation:'from-image' also
+  // fixes the classic "phone photo comes out sideways" bug — phone
+  // sensors capture in landscape and rely on EXIF to say how to
+  // display it, and a naive canvas draw ignores that tag entirely.
+  function compressImage(file, maxDimension, quality) {
+    maxDimension = maxDimension || 1600;
+    quality = quality || 0.82;
+    if (!file.type || !file.type.startsWith("image/")) return Promise.resolve(file);
+
+    var loadBitmap = window.createImageBitmap
+      ? createImageBitmap(file, { imageOrientation: "from-image" })
+      : new Promise(function (resolve, reject) {
+          var img = new Image();
+          img.onload = function () { resolve(img); };
+          img.onerror = reject;
+          img.src = URL.createObjectURL(file);
+        });
+
+    return loadBitmap.then(function (bitmap) {
+      var w = bitmap.width, h = bitmap.height;
+      var scale = Math.min(1, maxDimension / Math.max(w, h));
+      var canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      if (bitmap.close) bitmap.close();
+      return new Promise(function (resolve) {
+        canvas.toBlob(
+          function (blob) {
+            // Fall back to the original file if canvas encoding ever
+            // fails (some locked-down webviews block toBlob) — better
+            // to upload the original than to hard-fail the post.
+            resolve(blob || file);
+          },
+          "image/jpeg",
+          quality
+        );
+      });
+    }).catch(function () {
+      return file; // decode failed (corrupt/unsupported format) — let the server's own validation catch it
+    });
+  }
+
   function toast(message, isError) {
     var el = document.createElement("div");
     el.textContent = message;
@@ -91,5 +139,5 @@ window.Hub = (function () {
     }, 2600);
   }
 
-  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast };
+  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage };
 })();

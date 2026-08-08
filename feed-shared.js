@@ -59,10 +59,14 @@
     var content = textarea.value.trim();
     if (!content && !pendingImageFile) return H.toast("Write something or add a photo.", true);
     var submitBtn = document.getElementById("composer-submit");
+    var originalSubmitLabel = submitBtn.textContent;
     submitBtn.disabled = true;
 
     var uploadStep = pendingImageFile
-      ? H.api("upload-post-image", { method: "POST", headers: { "Content-Type": pendingImageFile.type }, body: pendingImageFile }).then(function (d) { pendingImageUrl = d.url; })
+      ? H.compressImage(pendingImageFile, 1600, 0.82).then(function (compressed) {
+          submitBtn.textContent = "Uploading…";
+          return H.api("upload-post-image", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: compressed });
+        }).then(function (d) { pendingImageUrl = d.url; submitBtn.textContent = originalSubmitLabel; })
       : Promise.resolve();
 
     uploadStep

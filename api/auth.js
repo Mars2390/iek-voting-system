@@ -21,7 +21,10 @@ import { applyCors, sendError } from "./_utils.js";
 // specifically the login step, not what happens after it.
 
 const SESSION_DAYS = 30;
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB
+// Client compresses images before upload (hub-common.js compressImage),
+// so real-world photos land well under this — it's a safety net for
+// the rare case compression falls back to the original file.
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
 
 // Vercel's (req, res)-style Node functions only auto-parse req.body for
 // application/json, application/x-www-form-urlencoded, and text/plain —
@@ -286,7 +289,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "No image data received." });
       }
       if (body.length > MAX_PHOTO_BYTES) {
-        return res.status(413).json({ error: "Image is too large. Keep it under 5MB." });
+        return res.status(413).json({ error: "Image is too large. Keep it under 10MB." });
       }
 
       const ext = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "jpg";
@@ -770,7 +773,7 @@ export default async function handler(req, res) {
       if (!contentType.startsWith("image/")) return res.status(400).json({ error: "Only image uploads are allowed." });
       const body = await readRawBody(req);
       if (!body.length) return res.status(400).json({ error: "No image data received." });
-      if (body.length > MAX_PHOTO_BYTES) return res.status(413).json({ error: "Image is too large. Keep it under 5MB." });
+      if (body.length > MAX_PHOTO_BYTES) return res.status(413).json({ error: "Image is too large. Keep it under 10MB." });
       const ext = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "jpg";
       const blob = await put(`post-photos/${session.id}-${Date.now()}.${ext}`, body, { access: "public", contentType });
       return res.status(200).json({ url: blob.url });

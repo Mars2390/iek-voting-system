@@ -103,7 +103,7 @@
               .map(function (m) {
                 return (
                   '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + '">' +
-                  '<div><div class="msg-bubble">' + H.escapeHtml(m.content) + "</div>" +
+                  '<div class="msg-bubble-col"><div class="msg-bubble">' + H.escapeHtml(m.content) + "</div>" +
                   '<div class="msg-bubble-time">' + fmtTime(m.createdAt) + "</div></div></div>"
                 );
               })
