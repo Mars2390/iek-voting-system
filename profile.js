@@ -39,12 +39,25 @@
 
     // Cover
     var coverImg = document.getElementById("pf-cover-img");
-    if (e.coverPhoto) { coverImg.src = e.coverPhoto; coverImg.hidden = false; } else { coverImg.hidden = true; }
+    if (e.coverPhoto) {
+      coverImg.src = e.coverPhoto;
+      coverImg.hidden = false;
+      coverImg.style.cursor = "pointer";
+      coverImg.onclick = function () { H.openLightbox([{ type: "image", url: e.coverPhoto }], 0); };
+    } else {
+      coverImg.hidden = true;
+      coverImg.onclick = null;
+    }
     document.getElementById("pf-cover-edit").hidden = !state.isSelf;
 
     // Avatar
     document.getElementById("pf-avatar").outerHTML = H.avatarHtml(e, "xl").replace('class="hub-avatar', 'id="pf-avatar" class="hub-avatar');
     document.getElementById("pf-avatar-edit").hidden = !state.isSelf;
+    if (e.profilePhoto) {
+      var avatarEl = document.getElementById("pf-avatar");
+      avatarEl.style.cursor = "pointer";
+      avatarEl.onclick = function () { H.openLightbox([{ type: "image", url: e.profilePhoto }], 0); };
+    }
 
     document.getElementById("pf-name").textContent = e.displayName;
     document.getElementById("pf-title").textContent = e.title || (state.isSelf ? "Add your title" : "");
@@ -516,7 +529,7 @@
       H.compressImage(file, kind === "cover" ? 1920 : 800, 0.82)
         .then(function (compressed) {
           if (compressed.size > 5 * 1024 * 1024) throw new Error("Image is still too large after compression — try a different photo.");
-          return H.api("upload-photo", { method: "POST", query: { kind: kind }, headers: { "Content-Type": "image/jpeg" }, body: compressed });
+          return H.api("upload-photo", { method: "POST", query: { kind: kind }, headers: { "Content-Type": compressed.type || "image/jpeg" }, body: compressed });
         })
         .then(function (data) {
           state.engineer = data.engineer;

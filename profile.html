@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="engineer-hub.css" />
 <link rel="stylesheet" href="dashboard.css" />
 <link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="feed-shared.css" />
 <link rel="stylesheet" href="profile.css" />
 </head>
 <body>
@@ -57,6 +58,16 @@
 
   <div class="hub-main pf-grid">
     <div class="pf-col-main">
+
+      <section class="hub-card pf-section" id="pf-posts-section" hidden>
+        <div class="pf-section-head">
+          <h2>Posts</h2>
+        </div>
+        <div id="pf-posts-list" class="feed-posts"></div>
+        <div style="text-align:center;margin-top:14px;">
+          <button id="pf-posts-loadmore" class="eh-btn eh-btn-ghost-light hub-btn-sm" hidden>Load more</button>
+        </div>
+      </section>
 
       <section class="hub-card pf-section">
         <div class="pf-section-head">
@@ -183,6 +194,8 @@
 
 <script src="hub-common.js"></script>
 <script src="app-nav.js"></script>
+<script src="post-shared.js"></script>
+<script src="profile-posts.js"></script>
 <script src="profile.js"></script>
 </body>
 </html>

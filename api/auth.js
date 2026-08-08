@@ -25,6 +25,13 @@ const SESSION_DAYS = 30;
 // so real-world photos land well under this — it's a safety net for
 // the rare case compression falls back to the original file.
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
+// No client-side video compression (Canvas can't touch video, and
+// re-encoding video server-side needs ffmpeg, which isn't available
+// in this runtime) — this cap is the only size control, so it's
+// deliberately tighter than the photo one.
+const MAX_VIDEO_BYTES = 40 * 1024 * 1024; // 40MB
+const REACTION_TYPES = ["like", "love", "celebrate", "laugh", "wow", "sad", "angry"];
+const TYPING_WINDOW_MS = 8000;
 
 // Vercel's (req, res)-style Node functions only auto-parse req.body for
 // application/json, application/x-www-form-urlencoded, and text/plain —
@@ -54,12 +61,12 @@ async function requireSession(sql, req, res) {
     return null;
   }
   const [session] = await sql`
-    SELECT s.id AS session_id, s.expires_at, e.*
+    SELECT s.id AS session_id, s.expires_at, (s.expires_at < NOW()) AS is_expired, e.*
     FROM sessions s
     JOIN engineers e ON e.id = s.engineer_id
     WHERE s.token = ${token}
   `;
-  if (!session || new Date(session.expires_at) < new Date()) {
+  if (!session || session.is_expired) {
     res.status(401).json({ error: "Your session has expired. Please log in again." });
     return null;
   }
@@ -130,6 +137,17 @@ async function logActivity(sql, engineerId, actionType, description) {
   `.catch(() => {});
 }
 
+// Personal, per-recipient notifications (bell icon) — distinct from
+// activity_feed, which is a public log of everyone's actions. Never
+// notify someone about their own action (e.g. liking your own post).
+async function notify(sql, recipientId, actorId, type, targetType, targetId) {
+  if (recipientId === actorId) return;
+  await sql`
+    INSERT INTO notifications (recipient_id, actor_id, type, target_type, target_id)
+    VALUES (${recipientId}, ${actorId}, ${type}, ${targetType}, ${targetId})
+  `.catch(() => {});
+}
+
 function computeProfileCompletion(e, counts) {
   const checks = [
     !!e.bio,
@@ -182,7 +200,6 @@ export default async function handler(req, res) {
 
       const cleanName = String(displayName || "").trim().slice(0, 150);
       const token = randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
       const isFirstLogin = !engineer.last_login;
 
       const [updated] = await sql`
@@ -196,7 +213,7 @@ export default async function handler(req, res) {
 
       await sql`
         INSERT INTO sessions (token, engineer_id, expires_at)
-        VALUES (${token}, ${engineer.id}, ${expiresAt.toISOString()})
+        VALUES (${token}, ${engineer.id}, NOW() + (${SESSION_DAYS}::int * INTERVAL '1 day'))
       `;
 
       if (isFirstLogin) {
@@ -558,6 +575,7 @@ export default async function handler(req, res) {
         const [row] = await sql`
           INSERT INTO connections (requester_id, addressee_id, status) VALUES (${session.id}, ${addresseeId}, 'pending') RETURNING *
         `;
+        await notify(sql, addresseeId, session.id, "connection_request", "profile", session.id);
         return res.status(201).json({ connection: row });
       }
 
@@ -571,6 +589,7 @@ export default async function handler(req, res) {
         const [updated] = await sql`UPDATE connections SET status = ${status}, updated_at = CURRENT_TIMESTAMP WHERE id = ${id} RETURNING *`;
         if (status === "accepted") {
           await logActivity(sql, session.id, "connected", `${session.display_name || session.name} connected with another engineer`);
+          await notify(sql, conn.requester_id, session.id, "connection_accepted", "profile", session.id);
         }
         return res.status(200).json({ connection: updated });
       }
@@ -694,20 +713,26 @@ export default async function handler(req, res) {
         const sort = req.query.sort === "top" ? "top" : "recent";
         const limit = Math.min(Number(req.query.limit) || 20, 50);
         const offset = Math.max(Number(req.query.offset) || 0, 0);
+        const authorId = req.query.authorId ? Number(req.query.authorId) : null;
+        const savedOnly = req.query.saved === "1";
 
         const rows = await sql`
           SELECT p.*, e.display_name AS author_display_name, e.name AS author_name, e.title AS author_title,
                  e.company AS author_company, e.profile_photo AS author_photo,
-                 (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS like_count,
                  (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count,
-                 EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND engineer_id = ${session.id}) AS liked_by_me,
-                 orig.id AS orig_id, orig.content AS orig_content, orig.image_url AS orig_image_url, orig.created_at AS orig_created_at,
-                 oe.display_name AS orig_author_display_name, oe.name AS orig_author_name, oe.profile_photo AS orig_author_photo
+                 (SELECT reaction_type FROM reactions WHERE post_id = p.id AND engineer_id = ${session.id}) AS my_reaction,
+                 EXISTS(SELECT 1 FROM saved_posts WHERE post_id = p.id AND engineer_id = ${session.id}) AS is_saved,
+                 (SELECT json_object_agg(reaction_type, cnt) FROM (SELECT reaction_type, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY reaction_type) rc) AS reaction_summary,
+                 (SELECT COUNT(*) FROM reactions WHERE post_id = p.id) AS reaction_count,
+                 orig.id AS orig_id, orig.content AS orig_content, orig.image_url AS orig_image_url, orig.video_url AS orig_video_url, orig.created_at AS orig_created_at,
+                 oe.display_name AS orig_author_display_name, oe.name AS orig_author_name, oe.profile_photo AS orig_author_photo, orig.author_id AS orig_author_id
           FROM posts p
           JOIN engineers e ON e.id = p.author_id
           LEFT JOIN posts orig ON orig.id = p.reposted_from_id
           LEFT JOIN engineers oe ON oe.id = orig.author_id
-          ORDER BY ${sort === "top" ? sql`(SELECT COUNT(*) FROM likes WHERE post_id = p.id) DESC, p.created_at DESC` : sql`p.created_at DESC`}
+          ${savedOnly ? sql`JOIN saved_posts sp ON sp.post_id = p.id AND sp.engineer_id = ${session.id}` : sql``}
+          WHERE (${authorId ?? 0}::int = 0 OR p.author_id = ${authorId ?? 0})
+          ORDER BY ${authorId ? sql`p.is_pinned DESC,` : sql``} ${sort === "top" ? sql`(SELECT COUNT(*) FROM reactions WHERE post_id = p.id) DESC, p.created_at DESC` : sql`p.created_at DESC`}
           LIMIT ${limit} OFFSET ${offset}
         `;
 
@@ -721,13 +746,17 @@ export default async function handler(req, res) {
             authorPhoto: p.author_photo,
             content: p.content,
             imageUrl: p.image_url,
+            videoUrl: p.video_url,
             createdAt: p.created_at,
-            likeCount: Number(p.like_count),
+            isPinned: p.is_pinned,
+            isSaved: p.is_saved,
             commentCount: Number(p.comment_count),
-            likedByMe: p.liked_by_me,
+            reactionCount: Number(p.reaction_count),
+            reactionSummary: p.reaction_summary || {},
+            myReaction: p.my_reaction,
             isMine: p.author_id === session.id,
             repostOf: p.orig_id
-              ? { id: p.orig_id, content: p.orig_content, imageUrl: p.orig_image_url, createdAt: p.orig_created_at, authorName: p.orig_author_display_name || p.orig_author_name, authorPhoto: p.orig_author_photo }
+              ? { id: p.orig_id, content: p.orig_content, imageUrl: p.orig_image_url, videoUrl: p.orig_video_url, createdAt: p.orig_created_at, authorId: p.orig_author_id, authorName: p.orig_author_display_name || p.orig_author_name, authorPhoto: p.orig_author_photo }
               : null,
           })),
         });
@@ -740,15 +769,22 @@ export default async function handler(req, res) {
         const b = req.body || {};
         const content = String(b.content || "").trim().slice(0, 3000);
         const repostedFromId = b.repostedFromId ? Number(b.repostedFromId) : null;
-        if (!content && !b.imageUrl && !repostedFromId) {
-          return res.status(400).json({ error: "Write something, add an image, or repost something." });
+        if (!content && !b.imageUrl && !b.videoUrl && !repostedFromId) {
+          return res.status(400).json({ error: "Write something, add media, or repost something." });
         }
         const [row] = await sql`
-          INSERT INTO posts (author_id, content, image_url, reposted_from_id)
-          VALUES (${session.id}, ${content || null}, ${b.imageUrl || null}, ${repostedFromId})
+          INSERT INTO posts (author_id, content, image_url, video_url, reposted_from_id)
+          VALUES (${session.id}, ${content || null}, ${b.imageUrl || null}, ${b.videoUrl || null}, ${repostedFromId})
           RETURNING *
         `;
         await logActivity(sql, session.id, repostedFromId ? "reposted" : "posted", `${session.display_name || session.name} ${repostedFromId ? "reposted an update" : "shared an update"}`);
+
+        if (repostedFromId) {
+          const [orig] = await sql`SELECT author_id FROM posts WHERE id = ${repostedFromId}`;
+          if (orig && orig.author_id !== session.id) {
+            await notify(sql, orig.author_id, session.id, "repost", "post", repostedFromId);
+          }
+        }
         return res.status(201).json({ postId: row.id });
       }
 
@@ -762,24 +798,81 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed." });
     }
 
-    if (action === "upload-post-image") {
+    if (action === "upload-post-image" || action === "upload-post-video") {
       if (req.method !== "POST") {
         res.setHeader("Allow", "POST, OPTIONS");
         return res.status(405).json({ error: "Method not allowed." });
       }
       const session = await requireSession(sql, req, res);
       if (!session) return;
+      const isVideo = action === "upload-post-video";
       const contentType = req.headers["content-type"] || "";
-      if (!contentType.startsWith("image/")) return res.status(400).json({ error: "Only image uploads are allowed." });
+      if (!contentType.startsWith(isVideo ? "video/" : "image/")) {
+        return res.status(400).json({ error: isVideo ? "Only video uploads are allowed." : "Only image uploads are allowed." });
+      }
       const body = await readRawBody(req);
-      if (!body.length) return res.status(400).json({ error: "No image data received." });
-      if (body.length > MAX_PHOTO_BYTES) return res.status(413).json({ error: "Image is too large. Keep it under 10MB." });
-      const ext = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "jpg";
-      const blob = await put(`post-photos/${session.id}-${Date.now()}.${ext}`, body, { access: "public", contentType });
+      if (!body.length) return res.status(400).json({ error: "No file data received." });
+      const cap = isVideo ? MAX_VIDEO_BYTES : MAX_PHOTO_BYTES;
+      if (body.length > cap) return res.status(413).json({ error: `File is too large. Keep it under ${Math.round(cap / 1024 / 1024)}MB.` });
+      const ext = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || (isVideo ? "mp4" : "jpg");
+      const blob = await put(`${isVideo ? "post-videos" : "post-photos"}/${session.id}-${Date.now()}.${ext}`, body, { access: "public", contentType });
       return res.status(200).json({ url: blob.url });
     }
 
-    if (action === "like-post") {
+    if (action === "react-post") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const postId = Number((req.body || {}).postId);
+      const reactionType = REACTION_TYPES.includes((req.body || {}).reactionType) ? req.body.reactionType : "like";
+      if (!postId) return res.status(400).json({ error: "postId is required." });
+
+      const [existing] = await sql`SELECT id, reaction_type FROM reactions WHERE post_id = ${postId} AND engineer_id = ${session.id}`;
+      let myReaction;
+      if (existing && existing.reaction_type === reactionType) {
+        await sql`DELETE FROM reactions WHERE id = ${existing.id}`;
+        myReaction = null;
+      } else if (existing) {
+        await sql`UPDATE reactions SET reaction_type = ${reactionType}, created_at = CURRENT_TIMESTAMP WHERE id = ${existing.id}`;
+        myReaction = reactionType;
+      } else {
+        await sql`INSERT INTO reactions (post_id, engineer_id, reaction_type) VALUES (${postId}, ${session.id}, ${reactionType})`;
+        myReaction = reactionType;
+        const [post] = await sql`SELECT author_id FROM posts WHERE id = ${postId}`;
+        if (post && post.author_id !== session.id) {
+          await notify(sql, post.author_id, session.id, "reaction", "post", postId);
+        }
+      }
+      const summaryRows = await sql`SELECT reaction_type, COUNT(*) AS cnt FROM reactions WHERE post_id = ${postId} GROUP BY reaction_type`;
+      const reactionSummary = {};
+      summaryRows.forEach((r) => { reactionSummary[r.reaction_type] = Number(r.cnt); });
+      const reactionCount = summaryRows.reduce((sum, r) => sum + Number(r.cnt), 0);
+      return res.status(200).json({ myReaction, reactionCount, reactionSummary });
+    }
+
+    if (action === "post-reactors") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const postId = Number(req.query.postId);
+      if (!postId) return res.status(400).json({ error: "postId is required." });
+      const rows = await sql`
+        SELECT r.reaction_type, e.id, e.display_name, e.name, e.profile_photo
+        FROM reactions r JOIN engineers e ON e.id = r.engineer_id
+        WHERE r.post_id = ${postId} ORDER BY r.created_at DESC LIMIT 100
+      `;
+      return res.status(200).json({
+        reactors: rows.map((r) => ({ id: r.id, displayName: r.display_name || r.name, profilePhoto: r.profile_photo, reactionType: r.reaction_type })),
+      });
+    }
+
+    if (action === "save-post") {
       if (req.method !== "POST") {
         res.setHeader("Allow", "POST, OPTIONS");
         return res.status(405).json({ error: "Method not allowed." });
@@ -788,18 +881,46 @@ export default async function handler(req, res) {
       if (!session) return;
       const postId = Number((req.body || {}).postId);
       if (!postId) return res.status(400).json({ error: "postId is required." });
-
-      const [existing] = await sql`SELECT id FROM likes WHERE post_id = ${postId} AND engineer_id = ${session.id}`;
-      let liked;
+      const [existing] = await sql`SELECT id FROM saved_posts WHERE post_id = ${postId} AND engineer_id = ${session.id}`;
+      let saved;
       if (existing) {
-        await sql`DELETE FROM likes WHERE id = ${existing.id}`;
-        liked = false;
+        await sql`DELETE FROM saved_posts WHERE id = ${existing.id}`;
+        saved = false;
       } else {
-        await sql`INSERT INTO likes (post_id, engineer_id) VALUES (${postId}, ${session.id})`;
-        liked = true;
+        await sql`INSERT INTO saved_posts (post_id, engineer_id) VALUES (${postId}, ${session.id})`;
+        saved = true;
       }
-      const [count] = await sql`SELECT COUNT(*) FROM likes WHERE post_id = ${postId}`;
-      return res.status(200).json({ liked, likeCount: Number(count.count) });
+      return res.status(200).json({ saved });
+    }
+
+    if (action === "pin-post") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const postId = Number((req.body || {}).postId);
+      const [post] = await sql`SELECT id, is_pinned FROM posts WHERE id = ${postId} AND author_id = ${session.id}`;
+      if (!post) return res.status(404).json({ error: "Post not found." });
+      // Only one pinned post per author — unpin any other before pinning this one.
+      await sql`UPDATE posts SET is_pinned = FALSE WHERE author_id = ${session.id} AND id != ${postId}`;
+      const [updated] = await sql`UPDATE posts SET is_pinned = ${!post.is_pinned} WHERE id = ${postId} RETURNING is_pinned`;
+      return res.status(200).json({ isPinned: updated.is_pinned });
+    }
+
+    if (action === "report-post") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const postId = Number((req.body || {}).postId);
+      const reason = String((req.body || {}).reason || "").trim().slice(0, 500);
+      if (!postId) return res.status(400).json({ error: "postId is required." });
+      await sql`INSERT INTO post_reports (post_id, reporter_id, reason) VALUES (${postId}, ${session.id}, ${reason || null})`;
+      return res.status(201).json({ success: true });
     }
 
     if (action === "comments") {
@@ -827,6 +948,8 @@ export default async function handler(req, res) {
         const content = String(b.content || "").trim().slice(0, 1000);
         if (!postId || !content) return res.status(400).json({ error: "postId and content are required." });
         const [row] = await sql`INSERT INTO comments (post_id, author_id, content) VALUES (${postId}, ${session.id}, ${content}) RETURNING *`;
+        const [post] = await sql`SELECT author_id FROM posts WHERE id = ${postId}`;
+        if (post) await notify(sql, post.author_id, session.id, "comment", "post", postId);
         return res.status(201).json({ comment: { id: row.id, content: row.content, createdAt: row.created_at, authorId: session.id, authorName: session.display_name || session.name, authorPhoto: session.profile_photo, isMine: true } });
       }
 
@@ -998,7 +1121,125 @@ export default async function handler(req, res) {
         const [message] = await sql`
           INSERT INTO messages (conversation_id, sender_id, content) VALUES (${conv.id}, ${session.id}, ${content}) RETURNING *
         `;
+        // Sending clears "typing" — otherwise the indicator can linger
+        // up to TYPING_WINDOW_MS after the message already arrived.
+        await sql`UPDATE conversations SET typing_by = NULL, typing_until = NULL WHERE id = ${conv.id}`;
+        await notify(sql, otherId, session.id, "message", "conversation", conv.id);
         return res.status(201).json({ conversationId: conv.id, message: { id: message.id, senderId: message.sender_id, content: message.content, isRead: message.is_read, createdAt: message.created_at, isMine: true } });
+      }
+
+      res.setHeader("Allow", "GET, POST, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    // Polled separately (not folded into GET messages) so the client can
+    // check "is the other person typing" every 2s without re-fetching
+    // the whole thread that often.
+    if (action === "typing") {
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const otherId = Number(req.query.with || (req.body || {}).withId);
+      if (!otherId) return res.status(400).json({ error: "with/withId is required." });
+      const lo = Math.min(session.id, otherId);
+      const hi = Math.max(session.id, otherId);
+
+      if (req.method === "GET") {
+        const [conv] = await sql`
+          SELECT (typing_by = ${otherId} AND typing_until > NOW()) AS is_typing
+          FROM conversations WHERE participant1_id = ${lo} AND participant2_id = ${hi}
+        `;
+        return res.status(200).json({ isTyping: !!(conv && conv.is_typing) });
+      }
+
+      if (req.method === "POST") {
+        await sql`
+          INSERT INTO conversations (participant1_id, participant2_id, typing_by, typing_until)
+          VALUES (${lo}, ${hi}, ${session.id}, NOW() + (${TYPING_WINDOW_MS}::int * INTERVAL '1 millisecond'))
+          ON CONFLICT (participant1_id, participant2_id) DO UPDATE SET typing_by = ${session.id}, typing_until = NOW() + (${TYPING_WINDOW_MS}::int * INTERVAL '1 millisecond')
+        `;
+        return res.status(200).json({ success: true });
+      }
+
+      res.setHeader("Allow", "GET, POST, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    // =========================================================
+    // NOTIFICATIONS
+    // =========================================================
+    if (action === "notifications") {
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      if (req.method === "GET") {
+        const rows = await sql`
+          SELECT n.id, n.type, n.target_type, n.target_id, n.is_read, n.created_at,
+                 a.id AS actor_id, a.display_name, a.name, a.profile_photo
+          FROM notifications n JOIN engineers a ON a.id = n.actor_id
+          WHERE n.recipient_id = ${session.id}
+          ORDER BY n.created_at DESC
+          LIMIT 100
+        `;
+
+        // Group consecutive same (type, target) notifications — "5 people
+        // liked your post" instead of 5 separate lines — same idea as
+        // LinkedIn's grouping, simple version: group everything sharing
+        // a type+target regardless of exact timestamp, since a single
+        // post/comment thread realistically only accumulates reactions
+        // over a short window anyway.
+        const groups = new Map();
+        const order = [];
+        for (const r of rows) {
+          const key = r.type + ":" + r.target_type + ":" + r.target_id;
+          if (!groups.has(key)) {
+            groups.set(key, { ...r, actorNames: [], actorPhotos: [], isReadAll: true, latestCreatedAt: r.created_at });
+            order.push(key);
+          }
+          const g = groups.get(key);
+          g.actorNames.push(r.display_name || r.name);
+          g.actorPhotos.push(r.profile_photo);
+          if (!r.is_read) g.isReadAll = false;
+          if (new Date(r.created_at) > new Date(g.latestCreatedAt)) g.latestCreatedAt = r.created_at;
+        }
+
+        const verb = { reaction: "reacted to your post", comment: "commented on your post", repost: "reposted your post", connection_request: "sent you a connection request", connection_accepted: "accepted your connection request", message: "sent you a message" };
+
+        const notifications = order.map((key) => {
+          const g = groups.get(key);
+          const names = g.actorNames;
+          let who;
+          if (names.length === 1) who = names[0];
+          else if (names.length === 2) who = names[0] + " and " + names[1];
+          else who = names[0] + " and " + (names.length - 1) + " others";
+          return {
+            id: g.id,
+            type: g.type,
+            targetType: g.target_type,
+            targetId: g.target_id,
+            isRead: g.isReadAll,
+            createdAt: g.latestCreatedAt,
+            actorId: g.actor_id,
+            actorPhoto: g.actorPhotos[0],
+            count: names.length,
+            text: who + " " + (verb[g.type] || "did something"),
+          };
+        });
+
+        const [unread] = await sql`SELECT COUNT(*) FROM notifications WHERE recipient_id = ${session.id} AND is_read = FALSE`;
+        return res.status(200).json({ notifications, unreadCount: Number(unread.count) });
+      }
+
+      if (req.method === "POST") {
+        const b = req.body || {};
+        if (b.markAll) {
+          await sql`UPDATE notifications SET is_read = TRUE WHERE recipient_id = ${session.id}`;
+        } else if (b.type && b.targetType && b.targetId) {
+          // Marking one grouped notification as read marks the whole group.
+          await sql`UPDATE notifications SET is_read = TRUE WHERE recipient_id = ${session.id} AND type = ${b.type} AND target_type = ${b.targetType} AND target_id = ${Number(b.targetId)}`;
+        } else if (b.id) {
+          await sql`UPDATE notifications SET is_read = TRUE WHERE id = ${Number(b.id)} AND recipient_id = ${session.id}`;
+        }
+        return res.status(200).json({ success: true });
       }
 
       res.setHeader("Allow", "GET, POST, OPTIONS");
@@ -1071,7 +1312,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, posts, upload-post-image, like-post, comments.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications.",
     });
   } catch (err) {
     return sendError(res, err);

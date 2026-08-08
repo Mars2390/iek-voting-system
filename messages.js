@@ -15,6 +15,8 @@
   var conversations = [];
   var activeOtherId = null;
   var pollTimer = null;
+  var typingPollTimer = null;
+  var isShowingTyping = false;
 
   var params = new URLSearchParams(window.location.search);
   var preselectId = params.get("with") ? Number(params.get("with")) : null;
@@ -77,6 +79,7 @@
     activeOtherId = otherId;
     threadEmpty.hidden = true;
     threadActive.hidden = false;
+    setTypingIndicator(false);
 
     var known = conversations.find(function (c) { return c.otherId === otherId; });
     if (known) {
@@ -92,6 +95,37 @@
 
     loadThread(true);
     renderConvList(searchInput.value.trim());
+    restartTypingPoll();
+  }
+
+  // ---------- Typing indicator ----------
+  var typingIndicatorEl = document.getElementById("msg-typing-indicator");
+  function setTypingIndicator(show) {
+    isShowingTyping = show;
+    typingIndicatorEl.hidden = !show;
+    if (show) bodyEl.scrollTop = bodyEl.scrollHeight;
+  }
+  function pollTyping() {
+    if (!activeOtherId) return;
+    H.api("typing", { query: { with: activeOtherId } })
+      .then(function (d) { setTypingIndicator(!!d.isTyping); })
+      .catch(function () {});
+  }
+  function restartTypingPoll() {
+    if (typingPollTimer) clearInterval(typingPollTimer);
+    pollTyping();
+    typingPollTimer = setInterval(pollTyping, 2500);
+  }
+  // Ping the server that I'm typing, throttled to once every 3s of
+  // continuous typing (not once per keystroke) — the server-side typing
+  // window is 8s, so a 3s ping cadence keeps it fresh without spamming.
+  var lastTypingPingAt = 0;
+  function pingTyping() {
+    if (!activeOtherId) return;
+    var now = Date.now();
+    if (now - lastTypingPingAt < 3000) return;
+    lastTypingPingAt = now;
+    H.api("typing", { method: "POST", body: { withId: activeOtherId } }).catch(function () {});
   }
 
   function loadThread(scrollToBottom) {
@@ -100,16 +134,21 @@
       .then(function (data) {
         bodyEl.innerHTML = data.messages.length
           ? data.messages
-              .map(function (m) {
+              .map(function (m, i) {
+                // A read receipt on every bubble is noisy and redundant —
+                // only the last message I sent needs one, same as most
+                // chat apps.
+                var isLastMine = m.isMine && !data.messages.slice(i + 1).some(function (later) { return later.isMine; });
+                var receipt = isLastMine ? '<span class="msg-bubble-receipt' + (m.isRead ? " is-read" : "") + '">' + (m.isRead ? "Read" : "Sent") + "</span>" : "";
                 return (
                   '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + '">' +
                   '<div class="msg-bubble-col"><div class="msg-bubble">' + H.escapeHtml(m.content) + "</div>" +
-                  '<div class="msg-bubble-time">' + fmtTime(m.createdAt) + "</div></div></div>"
+                  '<div class="msg-bubble-time"><span>' + fmtTime(m.createdAt) + "</span>" + receipt + "</div></div></div>"
                 );
               })
               .join("")
           : '<div class="hub-empty">No messages yet — say hello.</div>';
-        if (scrollToBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+        if (scrollToBottom || isShowingTyping) bodyEl.scrollTop = bodyEl.scrollHeight;
         loadConversations(); // refresh unread counts/previews in the list
       })
       .catch(function (err) { H.toast(err.message, true); });
@@ -120,6 +159,8 @@
     var content = inputEl.value.trim();
     if (!content || !activeOtherId) return;
     inputEl.value = "";
+    lastTypingPingAt = 0; // next keystroke pings immediately instead of waiting out the 3s throttle
+    setTypingIndicator(false);
     H.api("messages", { method: "POST", body: { recipientId: activeOtherId, content: content } })
       .then(function () { loadThread(true); })
       .catch(function (err) {
@@ -133,6 +174,7 @@
       sendForm.requestSubmit();
     }
   });
+  inputEl.addEventListener("input", pingTyping);
 
   searchInput.addEventListener("input", function () { renderConvList(searchInput.value.trim()); });
 
@@ -148,5 +190,8 @@
     if (activeOtherId) loadThread(false);
     else loadConversations();
   }, POLL_MS);
-  window.addEventListener("beforeunload", function () { clearInterval(pollTimer); });
+  window.addEventListener("beforeunload", function () {
+    clearInterval(pollTimer);
+    if (typingPollTimer) clearInterval(typingPollTimer);
+  });
 })();

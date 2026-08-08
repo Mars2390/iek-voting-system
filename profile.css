@@ -13,8 +13,14 @@
 }
 .pf-cover-edit-btn:hover { background: rgba(10,10,10,0.75); }
 
-.pf-header { padding-top: 0; margin-top: -56px; position: relative; display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
-.pf-avatar-wrap { position: relative; flex-shrink: 0; }
+/* .pf-header overlaps the bottom of .pf-cover (negative margin, to let
+   the avatar sit half-over the banner like LinkedIn). Its own flex-item
+   gaps are transparent but still hit-testable, so without this they sit
+   on top of — and silently swallow clicks meant for — the cover-photo
+   edit button underneath. Turn the container click-through and opt the
+   actual interactive content back in. */
+.pf-header { padding-top: 0; margin-top: -56px; position: relative; display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; pointer-events: none; }
+.pf-avatar-wrap { position: relative; flex-shrink: 0; pointer-events: auto; }
 .pf-avatar-edit-btn {
   position: absolute; right: 2px; bottom: 2px;
   width: 30px; height: 30px; border-radius: 50%;
@@ -24,6 +30,11 @@
 .pf-avatar-edit-btn:hover { background: var(--red-500); }
 
 .pf-header-info { flex: 1; min-width: 240px; padding-bottom: 6px; }
+/* Re-enable clicks only on the actual interactive leaf elements, not
+   the flex containers around them — those containers (pf-header-top,
+   pf-header-actions) are still full-width empty flex boxes that would
+   otherwise re-swallow clicks the same way pf-header itself did. */
+.pf-header-info a, .pf-header-info button, .pf-header-info input, .pf-header-info label { pointer-events: auto; }
 .pf-header-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
 #pf-name { font-family: var(--font-display); font-weight: 800; font-size: clamp(1.4rem, 3vw, 1.9rem); color: var(--ink); margin: 0; }
 .pf-title { margin: 2px 0 0; font-size: 15px; color: var(--ink-muted); font-weight: 600; }

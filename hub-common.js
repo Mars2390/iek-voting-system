@@ -87,6 +87,10 @@ window.Hub = (function () {
     maxDimension = maxDimension || 1600;
     quality = quality || 0.82;
     if (!file.type || !file.type.startsWith("image/")) return Promise.resolve(file);
+    // Recompressing a GIF through canvas only ever captures one frame —
+    // silently kills the animation, which defeats the entire point of
+    // uploading a GIF. Upload it as-is (GIFs are rarely huge anyway).
+    if (file.type === "image/gif") return Promise.resolve(file);
 
     var loadBitmap = window.createImageBitmap
       ? createImageBitmap(file, { imageOrientation: "from-image" })
@@ -123,6 +127,115 @@ window.Hub = (function () {
     });
   }
 
+  // Full-screen viewer for post/profile/cover images. `items` is
+  // [{type:'image', url}], `startIndex` picks which one opens first —
+  // multiple items get prev/next arrows + swipe, a single item doesn't.
+  function openLightbox(items, startIndex) {
+    items = (items || []).filter(function (it) { return it && it.url; });
+    if (!items.length) return;
+    var idx = Math.min(Math.max(startIndex || 0, 0), items.length - 1);
+
+    var overlay = document.createElement("div");
+    overlay.className = "hub-lightbox";
+    overlay.innerHTML =
+      '<button type="button" class="hub-lightbox-close" aria-label="Close">&times;</button>' +
+      '<button type="button" class="hub-lightbox-nav prev" aria-label="Previous">&#10094;</button>' +
+      '<div class="hub-lightbox-stage"></div>' +
+      '<button type="button" class="hub-lightbox-nav next" aria-label="Next">&#10095;</button>' +
+      '<span class="hub-lightbox-counter"></span>' +
+      '<a class="hub-lightbox-download" download target="_blank" rel="noopener">Download</a>';
+    document.body.appendChild(overlay);
+    var prevScroll = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    var stage = overlay.querySelector(".hub-lightbox-stage");
+    var prevBtn = overlay.querySelector(".prev");
+    var nextBtn = overlay.querySelector(".next");
+    var downloadLink = overlay.querySelector(".hub-lightbox-download");
+    var counter = overlay.querySelector(".hub-lightbox-counter");
+    var showNav = items.length > 1;
+    prevBtn.style.display = showNav ? "" : "none";
+    nextBtn.style.display = showNav ? "" : "none";
+    counter.style.display = showNav ? "" : "none";
+
+    function render() {
+      var item = items[idx];
+      stage.innerHTML = "";
+      var img = document.createElement("img");
+      img.src = item.url;
+      img.alt = "";
+      img.className = "hub-lightbox-media";
+      var zoomed = false;
+      img.addEventListener("click", function (e) {
+        e.stopPropagation();
+        zoomed = !zoomed;
+        img.classList.toggle("is-zoomed", zoomed);
+      });
+      stage.appendChild(img);
+      downloadLink.href = item.url;
+      if (showNav) counter.textContent = idx + 1 + " / " + items.length;
+    }
+    render();
+
+    function close() {
+      document.body.style.overflow = prevScroll;
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    }
+    function go(delta) {
+      idx = (idx + delta + items.length) % items.length;
+      render();
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close();
+      else if (e.key === "ArrowLeft" && showNav) go(-1);
+      else if (e.key === "ArrowRight" && showNav) go(1);
+    }
+    document.addEventListener("keydown", onKey);
+    overlay.querySelector(".hub-lightbox-close").onclick = close;
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay || e.target === stage) close();
+    });
+    prevBtn.onclick = function (e) { e.stopPropagation(); go(-1); };
+    nextBtn.onclick = function (e) { e.stopPropagation(); go(1); };
+
+    var touchStartX = null;
+    stage.addEventListener("touchstart", function (e) { touchStartX = e.touches[0].clientX; }, { passive: true });
+    stage.addEventListener("touchend", function (e) {
+      if (touchStartX == null || !showNav) return;
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(dx) > 50) go(dx > 0 ? -1 : 1);
+      touchStartX = null;
+    }, { passive: true });
+  }
+
+  // Universal broken-image fallback. `error` doesn't bubble, but it does
+  // fire during the capture phase, so one listener on `document` here
+  // catches every failed <img> load on every page that includes this
+  // file — a deleted/expired Blob URL, a corrupt upload that slipped
+  // past validation, an old bad photo — without every call site that
+  // renders an <img> needing its own onerror handling.
+  var BROKEN_IMG_SRC =
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+        '<rect width="100" height="100" fill="#eef0f2"/>' +
+        '<path d="M22 70l18-22 14 16 10-12 18 22z" fill="none" stroke="#b8bcc4" stroke-width="4" stroke-linejoin="round"/>' +
+        '<circle cx="34" cy="34" r="8" fill="none" stroke="#b8bcc4" stroke-width="4"/>' +
+        "</svg>"
+    );
+  document.addEventListener(
+    "error",
+    function (e) {
+      var el = e.target;
+      if (!el || el.tagName !== "IMG" || el.dataset.fallbackApplied) return;
+      el.dataset.fallbackApplied = "1";
+      el.src = BROKEN_IMG_SRC;
+      el.classList.add("hub-img-broken");
+    },
+    true
+  );
+
   function toast(message, isError) {
     var el = document.createElement("div");
     el.textContent = message;
@@ -139,5 +252,5 @@ window.Hub = (function () {
     }, 2600);
   }
 
-  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage };
+  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox };
 })();

@@ -64,6 +64,21 @@
     '<nav class="db-nav-links">' +
     links.map(function (l) { return linkHtml(l, false); }).join("") +
     "</nav>" +
+    // Notifications bell sits outside .db-nav-actions/.db-nav-links on
+    // purpose — both are display:none below the 860px breakpoint (the
+    // bottom tab bar takes over primary nav there), but notifications
+    // need to stay reachable at every width, so the bell lives directly
+    // in the row instead.
+    '<div class="nav-bell-wrap">' +
+    '<button id="nav-bell-btn" class="nav-bell-btn" type="button" aria-label="Notifications">' +
+    '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></svg>' +
+    '<span id="nav-notif-badge" class="nav-badge nav-bell-badge" hidden></span>' +
+    "</button>" +
+    '<div id="nav-notif-panel" class="nav-notif-panel" hidden>' +
+    '<div class="nav-notif-head"><h3>Notifications</h3><button id="nav-notif-markall" type="button">Mark all read</button></div>' +
+    '<div id="nav-notif-list" class="nav-notif-list"></div>' +
+    "</div>" +
+    "</div>" +
     '<div class="db-nav-actions">' +
     '<a href="/settings.html" class="db-link">Settings</a>' +
     '<button id="db-logout" type="button" class="eh-btn eh-btn-ghost-dark db-logout-btn">Logout</button>' +
@@ -142,8 +157,108 @@
       .catch(function () {});
   }
 
+  // Notifications bell — badge polls in the background; the list itself
+  // is only fetched when the panel is opened, not on every poll tick.
+  function notifUrl(n) {
+    if (n.targetType === "post") return "/profile.html#post-" + n.targetId;
+    if (n.type === "connection_request") return "/connections.html";
+    if (n.targetType === "profile") return "/profile.html?id=" + n.actorId;
+    if (n.targetType === "conversation") return "/messages.html?with=" + n.actorId;
+    return "#";
+  }
+
+  function refreshNotifBadge() {
+    if (!token) return;
+    fetch("/api/auth?action=notifications", { headers: { Authorization: "Bearer " + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        var el = document.getElementById("nav-notif-badge");
+        if (data.unreadCount > 0) {
+          el.textContent = data.unreadCount > 9 ? "9+" : String(data.unreadCount);
+          el.hidden = false;
+        } else {
+          el.hidden = true;
+        }
+      })
+      .catch(function () {});
+  }
+
+  function renderNotifList() {
+    var list = document.getElementById("nav-notif-list");
+    list.innerHTML = '<div class="hub-empty" style="padding:18px 0;">Loading…</div>';
+    fetch("/api/auth?action=notifications", { headers: { Authorization: "Bearer " + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        if (!data.notifications.length) {
+          list.innerHTML = '<div class="hub-empty" style="padding:18px 0;">No notifications yet.</div>';
+          return;
+        }
+        var H = window.Hub;
+        list.innerHTML = data.notifications
+          .map(function (n) {
+            return (
+              '<a href="' + notifUrl(n) + '" class="nav-notif-item' + (n.isRead ? "" : " is-unread") + '" data-type="' + n.type + '" data-target-type="' + n.targetType + '" data-target-id="' + n.targetId + '">' +
+              H.avatarHtml({ displayName: "", profilePhoto: n.actorPhoto }, "sm") +
+              '<span class="body"><span class="text">' + H.escapeHtml(n.text) + "</span><time>" + H.timeAgo(n.createdAt) + "</time></span>" +
+              (n.isRead ? "" : '<span class="dot"></span>') +
+              "</a>"
+            );
+          })
+          .join("");
+        list.querySelectorAll(".nav-notif-item").forEach(function (a) {
+          // Letting this be a plain <a> click races the browser's own
+          // navigation against the mark-read POST — navigating away
+          // aborts any fetch still in flight, so the click often
+          // wouldn't actually mark the notification read. Take over the
+          // click: fire the POST, then navigate once it (or its
+          // failure) is known, instead of leaving the two to race.
+          a.addEventListener("click", function (e) {
+            e.preventDefault();
+            var href = a.getAttribute("href");
+            fetch("/api/auth?action=notifications", {
+              method: "POST",
+              headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+              body: JSON.stringify({ type: a.dataset.type, targetType: a.dataset.targetType, targetId: Number(a.dataset.targetId) }),
+            })
+              .catch(function () {})
+              .finally(function () {
+                refreshNotifBadge();
+                window.location.href = href;
+              });
+          });
+        });
+      })
+      .catch(function () {
+        list.innerHTML = '<div class="hub-empty" style="padding:18px 0;">Couldn\'t load notifications.</div>';
+      });
+  }
+
+  var bellBtn = document.getElementById("nav-bell-btn");
+  var notifPanel = document.getElementById("nav-notif-panel");
+  bellBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    var opening = notifPanel.hidden;
+    notifPanel.hidden = !opening;
+    if (opening) renderNotifList();
+  });
+  document.addEventListener("click", function (e) {
+    if (!notifPanel.hidden && !notifPanel.contains(e.target) && e.target !== bellBtn) notifPanel.hidden = true;
+  });
+  document.getElementById("nav-notif-markall").addEventListener("click", function (e) {
+    e.stopPropagation();
+    fetch("/api/auth?action=notifications", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ markAll: true }),
+    }).then(function () { refreshNotifBadge(); renderNotifList(); });
+  });
+
   refreshUnreadBadge();
   refreshNetworkBadge();
+  refreshNotifBadge();
   setInterval(refreshUnreadBadge, 20000);
   setInterval(refreshNetworkBadge, 20000);
+  setInterval(refreshNotifBadge, 20000);
 })();

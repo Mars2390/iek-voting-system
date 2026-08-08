@@ -53,11 +53,20 @@
               <img id="composer-image-preview-img" src="" alt="" />
               <button type="button" id="composer-image-remove">&times;</button>
             </div>
+            <div id="composer-video-preview" class="feed-composer-video-preview" hidden>
+              <span id="composer-video-preview-name"></span>
+              <button type="button" id="composer-video-remove">&times;</button>
+            </div>
             <div class="feed-composer-foot">
               <label class="feed-composer-photo-btn">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="8.5" cy="10.5" r="1.5" /><path d="M21 15l-5-5-9 9" /></svg>
                 Photo
                 <input type="file" id="composer-image-input" accept="image/*" hidden />
+              </label>
+              <label class="feed-composer-video-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="14" height="14" rx="2" /><path d="M17 10l4-2.5v9L17 14" /></svg>
+                Video
+                <input type="file" id="composer-video-input" accept="video/*" hidden />
               </label>
               <span id="composer-charcount" class="feed-composer-charcount">0 / 3000</span>
               <button type="button" id="composer-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm">Cancel</button>
@@ -107,6 +116,7 @@
 
 <script src="hub-common.js"></script>
 <script src="app-nav.js"></script>
+<script src="post-shared.js"></script>
 <script src="feed-shared.js"></script>
 <script src="dashboard.js"></script>
 </body>
