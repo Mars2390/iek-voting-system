@@ -25,11 +25,27 @@
 </section>
 
 <main class="hub-main">
-  <div class="hub-filterbar">
-    <input type="text" id="jobs-search" placeholder="Search by title or company…" />
-    <select id="jobs-discipline"><option value="">All disciplines</option></select>
-    <button id="jobs-post-btn" class="eh-btn eh-btn-primary hub-btn-sm">+ Post a job</button>
+  <div class="hub-tabs">
+    <button class="hub-tab is-active" data-jobtab="browse">Browse jobs</button>
+    <button class="hub-tab" data-jobtab="mine">My postings <span id="jobs-mine-count"></span></button>
   </div>
+
+  <div id="jobs-browse-panel">
+    <div class="hub-filterbar">
+      <input type="text" id="jobs-search" placeholder="Search by title or company…" />
+      <select id="jobs-discipline"><option value="">All disciplines</option></select>
+      <select id="jobs-type">
+        <option value="">All types</option>
+        <option>Full-time</option>
+        <option>Internship</option>
+        <option>Contract</option>
+        <option>Part-time</option>
+      </select>
+      <input type="text" id="jobs-location" placeholder="Location…" style="max-width:160px;" />
+      <button id="jobs-post-btn" class="eh-btn eh-btn-primary hub-btn-sm">+ Post a job</button>
+    </div>
+  </div>
+  <div id="jobs-mine-panel" hidden></div>
 
   <form id="jobs-form" class="hub-card" hidden style="margin-bottom:24px;">
     <h2 style="margin:0 0 16px;font-size:16px;">Post a job</h2>
@@ -50,6 +66,10 @@
       </label>
     </div>
     <label class="lg-field"><span>Discipline</span><input type="text" id="job-discipline" placeholder="e.g. Electrical Engineering" /></label>
+    <div class="pf-form-row">
+      <label class="lg-field"><span>Salary min (KES/month, optional)</span><input type="number" id="job-salary-min" min="0" /></label>
+      <label class="lg-field"><span>Salary max (KES/month, optional)</span><input type="number" id="job-salary-max" min="0" /></label>
+    </div>
     <label class="lg-field"><span>Description</span><textarea id="job-description" rows="4" required style="width:100%;font-family:var(--font-body);font-size:14px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--ink);"></textarea></label>
     <div class="pf-form-row">
       <label class="lg-field"><span>Apply URL</span><input type="url" id="job-apply-url" placeholder="https://…" /></label>

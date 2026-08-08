@@ -1,5 +1,14 @@
 /* ============ Shared app-page primitives (directory/connections/jobs/feed/profile/settings) ============ */
 
+/* Same fix as the voting system's own styles.css: several rules below
+   set `display` explicitly (.hub-list, .hub-people-grid, etc.), which
+   as author styles beat the browser's low-priority default
+   `[hidden]{display:none}`. Without this, toggling the `hidden`
+   attribute on anything carrying one of those classes silently does
+   nothing — the element stays visible. This one rule fixes the whole
+   class of bug everywhere, not just per-component. */
+[hidden] { display: none !important; }
+
 .hub-main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 80px; }
 
 /* Page-top banner with a real photo background + dark scrim */

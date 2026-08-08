@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Dashboard — Engineer Hub</title>
+<title>Home — Engineer Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="engineer-hub.css" />
 <link rel="stylesheet" href="dashboard.css" />
 <link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="feed-shared.css" />
 </head>
 <body>
 
@@ -20,7 +21,7 @@
 
   <div id="db-content" class="hub-main" hidden>
     <h1 id="db-welcome" class="db-welcome">Welcome back!</h1>
-    <p class="db-sub">Here's what's happening with your Engineer Hub profile.</p>
+    <p class="db-sub">Here's what's happening in your network.</p>
 
     <div class="db-stat-row">
       <div class="hub-card db-stat-card">
@@ -40,29 +41,64 @@
 
     <div class="db-grid2">
       <div>
+        <!-- Composer -->
+        <section class="hub-card feed-composer">
+          <div class="feed-composer-row">
+            <span id="composer-avatar"></span>
+            <button type="button" id="composer-open-btn" class="feed-composer-fake-input">Start a post…</button>
+          </div>
+          <form id="composer-form" class="feed-composer-form" hidden>
+            <textarea id="composer-text" rows="3" maxlength="3000" placeholder="Share an update with your network…"></textarea>
+            <div id="composer-image-preview" class="feed-composer-image-preview" hidden>
+              <img id="composer-image-preview-img" src="" alt="" />
+              <button type="button" id="composer-image-remove">&times;</button>
+            </div>
+            <div class="feed-composer-foot">
+              <label class="feed-composer-photo-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="8.5" cy="10.5" r="1.5" /><path d="M21 15l-5-5-9 9" /></svg>
+                Photo
+                <input type="file" id="composer-image-input" accept="image/*" hidden />
+              </label>
+              <span id="composer-charcount" class="feed-composer-charcount">0 / 3000</span>
+              <button type="button" id="composer-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm">Cancel</button>
+              <button type="submit" id="composer-submit" class="eh-btn eh-btn-primary hub-btn-sm">Post</button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Sort tabs -->
+        <div class="hub-tabs" style="margin-top:20px;">
+          <button class="hub-tab is-active" data-sort="recent">Recent</button>
+          <button class="hub-tab" data-sort="top">Top</button>
+        </div>
+
+        <div id="feed-posts" class="feed-posts"></div>
+        <div style="text-align:center;margin-top:16px;">
+          <button id="feed-loadmore" class="eh-btn eh-btn-ghost-light hub-btn-sm" hidden>Load more</button>
+        </div>
+      </div>
+
+      <aside>
         <section class="hub-card" style="margin-bottom:20px;">
           <h2 class="db-section-h">Quick actions</h2>
           <div class="db-actions">
             <a href="/profile.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Edit profile</a>
             <a href="/directory.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Find engineers</a>
             <a href="/jobs.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Browse jobs</a>
-            <a href="/feed.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">View feed</a>
           </div>
+        </section>
+
+        <section class="hub-card" style="margin-bottom:20px;">
+          <h2 class="db-section-h">Engineers you may know</h2>
+          <div id="db-suggestions" class="db-suggestions"></div>
         </section>
 
         <section class="hub-card">
           <div class="pf-section-head">
-            <h2 class="db-section-h" style="margin:0;">Recent activity</h2>
+            <h2 class="db-section-h" style="margin:0;">System activity</h2>
             <a href="/feed.html" class="pf-edit-link">See all</a>
           </div>
           <div id="db-activity" class="hub-list"></div>
-        </section>
-      </div>
-
-      <aside>
-        <section class="hub-card">
-          <h2 class="db-section-h">Engineers you may know</h2>
-          <div id="db-suggestions" class="db-suggestions"></div>
         </section>
       </aside>
     </div>
@@ -71,6 +107,7 @@
 
 <script src="hub-common.js"></script>
 <script src="app-nav.js"></script>
+<script src="feed-shared.js"></script>
 <script src="dashboard.js"></script>
 </body>
 </html>

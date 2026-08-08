@@ -30,6 +30,9 @@
         document.getElementById("tab-count-connections").textContent = data.connections.length ? "(" + data.connections.length + ")" : "";
         document.getElementById("tab-count-incoming").textContent = data.incoming.length ? "(" + data.incoming.length + ")" : "";
         document.getElementById("tab-count-outgoing").textContent = data.outgoing.length ? "(" + data.outgoing.length + ")" : "";
+        document.getElementById("net-stat-connections").textContent = data.connections.length;
+        document.getElementById("net-stat-incoming").textContent = data.incoming.length;
+        document.getElementById("net-stat-outgoing").textContent = data.outgoing.length;
 
         panels.connections.innerHTML = data.connections.length
           ? data.connections.map(function (p) { return personRow(p, '<a href="/profile.html?id=' + p.id + '" class="eh-btn eh-btn-ghost-light hub-btn-sm">View</a>'); }).join("")

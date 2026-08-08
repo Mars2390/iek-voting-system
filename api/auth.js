@@ -101,6 +101,25 @@ function publicEngineer(e) {
   return priv;
 }
 
+function mapJob(j) {
+  return {
+    id: j.id,
+    title: j.title,
+    companyName: j.company_name,
+    location: j.location,
+    jobType: j.job_type,
+    discipline: j.discipline,
+    description: j.description,
+    applyUrl: j.apply_url,
+    applyEmail: j.apply_email,
+    salaryMin: j.salary_min,
+    salaryMax: j.salary_max,
+    postedBy: j.poster_name || j.poster_registered_name || "Engineer Hub member",
+    postedById: j.posted_by,
+    createdAt: j.created_at,
+  };
+}
+
 async function logActivity(sql, engineerId, actionType, description) {
   await sql`
     INSERT INTO activity_feed (engineer_id, action_type, description)
@@ -599,40 +618,39 @@ export default async function handler(req, res) {
     // JOBS
     // =========================================================
     if (action === "jobs") {
-      if (req.method === "GET") {
+      if (req.method === "GET" && !req.query.mine) {
         const discipline = String(req.query.discipline || "").trim();
+        const jobType = String(req.query.jobType || "").trim();
+        const location = String(req.query.location || "").trim();
         const q = String(req.query.q || "").trim();
         const like = `%${q}%`;
+        const locLike = `%${location}%`;
         const rows = await sql`
           SELECT j.*, e.display_name AS poster_name, e.name AS poster_registered_name
           FROM jobs j
           LEFT JOIN engineers e ON e.id = j.posted_by
           WHERE j.is_active = TRUE
             AND (${discipline}::text = '' OR j.discipline = ${discipline})
+            AND (${jobType}::text = '' OR j.job_type = ${jobType})
+            AND (${location}::text = '' OR j.location ILIKE ${locLike})
             AND (${q}::text = '' OR j.title ILIKE ${like} OR j.company_name ILIKE ${like})
           ORDER BY j.created_at DESC
           LIMIT 50
         `;
-        return res.status(200).json({
-          jobs: rows.map((j) => ({
-            id: j.id,
-            title: j.title,
-            companyName: j.company_name,
-            location: j.location,
-            jobType: j.job_type,
-            discipline: j.discipline,
-            description: j.description,
-            applyUrl: j.apply_url,
-            applyEmail: j.apply_email,
-            postedBy: j.poster_name || j.poster_registered_name || "Engineer Hub member",
-            postedById: j.posted_by,
-            createdAt: j.created_at,
-          })),
-        });
+        return res.status(200).json({ jobs: rows.map(mapJob) });
       }
 
       const session = await requireSession(sql, req, res);
       if (!session) return;
+
+      if (req.method === "GET" && req.query.mine) {
+        const rows = await sql`
+          SELECT j.*, e.display_name AS poster_name, e.name AS poster_registered_name
+          FROM jobs j LEFT JOIN engineers e ON e.id = j.posted_by
+          WHERE j.posted_by = ${session.id} ORDER BY j.created_at DESC
+        `;
+        return res.status(200).json({ jobs: rows.map(mapJob) });
+      }
 
       if (req.method === "POST") {
         const b = req.body || {};
@@ -642,18 +660,176 @@ export default async function handler(req, res) {
         if (!b.applyUrl && !b.applyEmail) {
           return res.status(400).json({ error: "Add a way to apply — a URL or an email address." });
         }
+        const salaryMin = Number(b.salaryMin) || null;
+        const salaryMax = Number(b.salaryMax) || null;
         const [row] = await sql`
-          INSERT INTO jobs (posted_by, title, company_name, location, job_type, discipline, description, apply_url, apply_email)
-          VALUES (${session.id}, ${b.title}, ${b.companyName}, ${b.location || null}, ${b.jobType || null}, ${b.discipline || null}, ${b.description}, ${b.applyUrl || null}, ${b.applyEmail || null})
+          INSERT INTO jobs (posted_by, title, company_name, location, job_type, discipline, description, apply_url, apply_email, salary_min, salary_max)
+          VALUES (${session.id}, ${b.title}, ${b.companyName}, ${b.location || null}, ${b.jobType || null}, ${b.discipline || null}, ${b.description}, ${b.applyUrl || null}, ${b.applyEmail || null}, ${salaryMin}, ${salaryMax})
           RETURNING *
         `;
         await logActivity(sql, session.id, "job_posted", `${session.display_name || session.name} posted a job: ${b.title} at ${b.companyName}`);
-        return res.status(201).json({ job: row });
+        return res.status(201).json({ job: mapJob({ ...row, poster_name: session.display_name, poster_registered_name: session.name }) });
       }
 
       if (req.method === "DELETE") {
         const id = Number(req.query.id || (req.body || {}).id);
         await sql`UPDATE jobs SET is_active = FALSE WHERE id = ${id} AND posted_by = ${session.id}`;
+        return res.status(200).json({ success: true });
+      }
+
+      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    // =========================================================
+    // FEED — posts, comments, likes, reposts
+    // =========================================================
+    if (action === "posts") {
+      if (req.method === "GET") {
+        const session = await requireSession(sql, req, res);
+        if (!session) return;
+        const sort = req.query.sort === "top" ? "top" : "recent";
+        const limit = Math.min(Number(req.query.limit) || 20, 50);
+        const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+        const rows = await sql`
+          SELECT p.*, e.display_name AS author_display_name, e.name AS author_name, e.title AS author_title,
+                 e.company AS author_company, e.profile_photo AS author_photo,
+                 (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS like_count,
+                 (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count,
+                 EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND engineer_id = ${session.id}) AS liked_by_me,
+                 orig.id AS orig_id, orig.content AS orig_content, orig.image_url AS orig_image_url, orig.created_at AS orig_created_at,
+                 oe.display_name AS orig_author_display_name, oe.name AS orig_author_name, oe.profile_photo AS orig_author_photo
+          FROM posts p
+          JOIN engineers e ON e.id = p.author_id
+          LEFT JOIN posts orig ON orig.id = p.reposted_from_id
+          LEFT JOIN engineers oe ON oe.id = orig.author_id
+          ORDER BY ${sort === "top" ? sql`(SELECT COUNT(*) FROM likes WHERE post_id = p.id) DESC, p.created_at DESC` : sql`p.created_at DESC`}
+          LIMIT ${limit} OFFSET ${offset}
+        `;
+
+        return res.status(200).json({
+          posts: rows.map((p) => ({
+            id: p.id,
+            authorId: p.author_id,
+            authorName: p.author_display_name || p.author_name,
+            authorTitle: p.author_title,
+            authorCompany: p.author_company,
+            authorPhoto: p.author_photo,
+            content: p.content,
+            imageUrl: p.image_url,
+            createdAt: p.created_at,
+            likeCount: Number(p.like_count),
+            commentCount: Number(p.comment_count),
+            likedByMe: p.liked_by_me,
+            isMine: p.author_id === session.id,
+            repostOf: p.orig_id
+              ? { id: p.orig_id, content: p.orig_content, imageUrl: p.orig_image_url, createdAt: p.orig_created_at, authorName: p.orig_author_display_name || p.orig_author_name, authorPhoto: p.orig_author_photo }
+              : null,
+          })),
+        });
+      }
+
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      if (req.method === "POST") {
+        const b = req.body || {};
+        const content = String(b.content || "").trim().slice(0, 3000);
+        const repostedFromId = b.repostedFromId ? Number(b.repostedFromId) : null;
+        if (!content && !b.imageUrl && !repostedFromId) {
+          return res.status(400).json({ error: "Write something, add an image, or repost something." });
+        }
+        const [row] = await sql`
+          INSERT INTO posts (author_id, content, image_url, reposted_from_id)
+          VALUES (${session.id}, ${content || null}, ${b.imageUrl || null}, ${repostedFromId})
+          RETURNING *
+        `;
+        await logActivity(sql, session.id, repostedFromId ? "reposted" : "posted", `${session.display_name || session.name} ${repostedFromId ? "reposted an update" : "shared an update"}`);
+        return res.status(201).json({ postId: row.id });
+      }
+
+      if (req.method === "DELETE") {
+        const id = Number(req.query.id || (req.body || {}).id);
+        await sql`DELETE FROM posts WHERE id = ${id} AND author_id = ${session.id}`;
+        return res.status(200).json({ success: true });
+      }
+
+      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    if (action === "upload-post-image") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const contentType = req.headers["content-type"] || "";
+      if (!contentType.startsWith("image/")) return res.status(400).json({ error: "Only image uploads are allowed." });
+      const body = await readRawBody(req);
+      if (!body.length) return res.status(400).json({ error: "No image data received." });
+      if (body.length > MAX_PHOTO_BYTES) return res.status(413).json({ error: "Image is too large. Keep it under 5MB." });
+      const ext = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "jpg";
+      const blob = await put(`post-photos/${session.id}-${Date.now()}.${ext}`, body, { access: "public", contentType });
+      return res.status(200).json({ url: blob.url });
+    }
+
+    if (action === "like-post") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const postId = Number((req.body || {}).postId);
+      if (!postId) return res.status(400).json({ error: "postId is required." });
+
+      const [existing] = await sql`SELECT id FROM likes WHERE post_id = ${postId} AND engineer_id = ${session.id}`;
+      let liked;
+      if (existing) {
+        await sql`DELETE FROM likes WHERE id = ${existing.id}`;
+        liked = false;
+      } else {
+        await sql`INSERT INTO likes (post_id, engineer_id) VALUES (${postId}, ${session.id})`;
+        liked = true;
+      }
+      const [count] = await sql`SELECT COUNT(*) FROM likes WHERE post_id = ${postId}`;
+      return res.status(200).json({ liked, likeCount: Number(count.count) });
+    }
+
+    if (action === "comments") {
+      if (req.method === "GET") {
+        const session = await requireSession(sql, req, res);
+        if (!session) return;
+        const postId = Number(req.query.postId);
+        if (!postId) return res.status(400).json({ error: "postId is required." });
+        const rows = await sql`
+          SELECT c.id, c.content, c.created_at, c.author_id, e.display_name, e.name, e.profile_photo
+          FROM comments c JOIN engineers e ON e.id = c.author_id
+          WHERE c.post_id = ${postId} ORDER BY c.created_at ASC
+        `;
+        return res.status(200).json({
+          comments: rows.map((c) => ({ id: c.id, content: c.content, createdAt: c.created_at, authorId: c.author_id, authorName: c.display_name || c.name, authorPhoto: c.profile_photo, isMine: c.author_id === session.id })),
+        });
+      }
+
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      if (req.method === "POST") {
+        const b = req.body || {};
+        const postId = Number(b.postId);
+        const content = String(b.content || "").trim().slice(0, 1000);
+        if (!postId || !content) return res.status(400).json({ error: "postId and content are required." });
+        const [row] = await sql`INSERT INTO comments (post_id, author_id, content) VALUES (${postId}, ${session.id}, ${content}) RETURNING *`;
+        return res.status(201).json({ comment: { id: row.id, content: row.content, createdAt: row.created_at, authorId: session.id, authorName: session.display_name || session.name, authorPhoto: session.profile_photo, isMine: true } });
+      }
+
+      if (req.method === "DELETE") {
+        const id = Number(req.query.id || (req.body || {}).id);
+        await sql`DELETE FROM comments WHERE id = ${id} AND author_id = ${session.id}`;
         return res.status(200).json({ success: true });
       }
 
@@ -892,7 +1068,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, posts, upload-post-image, like-post, comments.",
     });
   } catch (err) {
     return sendError(res, err);

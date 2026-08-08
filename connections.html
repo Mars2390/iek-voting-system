@@ -25,9 +25,15 @@
 </section>
 
 <main class="hub-main">
+  <div class="db-stat-row" style="margin-top:0;margin-bottom:24px;">
+    <div class="hub-card db-stat-card"><span class="db-stat-num" id="net-stat-connections">0</span><span class="db-stat-label">Connections</span></div>
+    <div class="hub-card db-stat-card"><span class="db-stat-num" id="net-stat-incoming">0</span><span class="db-stat-label">Invitations received</span></div>
+    <div class="hub-card db-stat-card"><span class="db-stat-num" id="net-stat-outgoing">0</span><span class="db-stat-label">Requests sent</span></div>
+  </div>
+
   <div class="hub-tabs">
     <button class="hub-tab is-active" data-tab="connections">My Connections <span id="tab-count-connections"></span></button>
-    <button class="hub-tab" data-tab="incoming">Requests <span id="tab-count-incoming"></span></button>
+    <button class="hub-tab" data-tab="incoming">Invitations <span id="tab-count-incoming"></span></button>
     <button class="hub-tab" data-tab="outgoing">Pending <span id="tab-count-outgoing"></span></button>
   </div>
 
