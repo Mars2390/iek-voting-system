@@ -64,11 +64,22 @@
     '<nav class="db-nav-links">' +
     links.map(function (l) { return linkHtml(l, false); }).join("") +
     "</nav>" +
-    // Notifications bell sits outside .db-nav-actions/.db-nav-links on
-    // purpose — both are display:none below the 860px breakpoint (the
-    // bottom tab bar takes over primary nav there), but notifications
-    // need to stay reachable at every width, so the bell lives directly
-    // in the row instead.
+    // Search and the notifications bell both sit outside
+    // .db-nav-actions/.db-nav-links on purpose — both of those are
+    // display:none below the 860px breakpoint (the bottom tab bar takes
+    // over primary nav there), but search and notifications need to
+    // stay reachable at every width, so they live directly in the row.
+    '<div class="nav-search-wrap">' +
+    '<button id="nav-search-btn" class="nav-bell-btn" type="button" aria-label="Search">' +
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>' +
+    "</button>" +
+    '<div id="nav-search-panel" class="nav-notif-panel nav-search-panel" hidden>' +
+    '<div class="nav-search-input-wrap">' +
+    '<input type="text" id="nav-search-input" placeholder="Search engineers, title, company…" autocomplete="off" />' +
+    "</div>" +
+    '<div id="nav-search-results" class="nav-notif-list"></div>' +
+    "</div>" +
+    "</div>" +
     '<div class="nav-bell-wrap">' +
     '<button id="nav-bell-btn" class="nav-bell-btn" type="button" aria-label="Notifications">' +
     '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></svg>' +
@@ -234,6 +245,71 @@
         list.innerHTML = '<div class="hub-empty" style="padding:18px 0;">Couldn\'t load notifications.</div>';
       });
   }
+
+  // ---------- Search (engineers / title / company) ----------
+  var searchBtn = document.getElementById("nav-search-btn");
+  var searchPanel = document.getElementById("nav-search-panel");
+  var searchInput = document.getElementById("nav-search-input");
+  var searchResults = document.getElementById("nav-search-results");
+  var searchDebounce = null;
+  var searchSeq = 0;
+
+  function renderSearchResults(q) {
+    if (!q) {
+      searchResults.innerHTML = '<div class="hub-empty" style="padding:18px 0;">Start typing a name, title, or company…</div>';
+      return;
+    }
+    var seq = ++searchSeq;
+    fetch("/api/auth?action=directory&" + new URLSearchParams({ q: q, limit: 6 }), { headers: { Authorization: "Bearer " + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || seq !== searchSeq) return;
+        var H = window.Hub;
+        if (!data.engineers.length) {
+          searchResults.innerHTML = '<div class="hub-empty" style="padding:18px 0;">No one matches "' + H.escapeHtml(q) + '".</div>';
+          return;
+        }
+        var html = data.engineers
+          .map(function (e) {
+            var role = [e.title, e.company].filter(Boolean).join(" at ");
+            return (
+              '<a href="/profile.html?id=' + e.id + '" class="nav-notif-item">' +
+              H.avatarHtml(e, "sm") +
+              '<span class="body"><span class="text">' + H.escapeHtml(e.displayName) + "</span>" +
+              (role ? '<span class="sub">' + H.escapeHtml(role) + "</span>" : "") +
+              "</span></a>"
+            );
+          })
+          .join("");
+        html += '<a href="/directory.html?q=' + encodeURIComponent(q) + '" class="nav-search-seeall">See all results for "' + H.escapeHtml(q) + '"</a>';
+        searchResults.innerHTML = html;
+      })
+      .catch(function () {});
+  }
+
+  searchBtn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    var opening = searchPanel.hidden;
+    searchPanel.hidden = !opening;
+    if (opening) {
+      renderSearchResults(searchInput.value.trim());
+      setTimeout(function () { searchInput.focus(); }, 0);
+    }
+  });
+  document.addEventListener("click", function (e) {
+    if (!searchPanel.hidden && !searchPanel.contains(e.target) && e.target !== searchBtn) searchPanel.hidden = true;
+  });
+  searchInput.addEventListener("input", function () {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(function () { renderSearchResults(searchInput.value.trim()); }, 300);
+  });
+  searchInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      var q = searchInput.value.trim();
+      if (q) window.location.href = "/directory.html?q=" + encodeURIComponent(q);
+    }
+  });
 
   var bellBtn = document.getElementById("nav-bell-btn");
   var notifPanel = document.getElementById("nav-notif-panel");

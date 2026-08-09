@@ -8,6 +8,8 @@
     connections: document.getElementById("panel-connections"),
     incoming: document.getElementById("panel-incoming"),
     outgoing: document.getElementById("panel-outgoing"),
+    following: document.getElementById("panel-following"),
+    followers: document.getElementById("panel-followers"),
   };
 
   function personRow(p, actionsHtml) {
@@ -59,6 +61,29 @@
       .catch(function (err) { H.toast(err.message, true); });
   }
 
+  function loadFollows() {
+    H.api("follows", { query: { type: "following" } }).then(function (data) {
+      document.getElementById("tab-count-following").textContent = data.people.length ? "(" + data.people.length + ")" : "";
+      panels.following.innerHTML = data.people.length
+        ? data.people.map(function (p) { return personRow(p, '<button class="eh-btn eh-btn-ghost-light hub-btn-sm" data-unfollow="' + p.id + '">Unfollow</button>'); }).join("")
+        : '<div class="hub-empty">You\'re not following anyone yet. Follow someone from their profile to see their posts here.</div>';
+      wireActions();
+    }).catch(function (err) { H.toast(err.message, true); });
+
+    H.api("follows", { query: { type: "followers" } }).then(function (data) {
+      document.getElementById("tab-count-followers").textContent = data.people.length ? "(" + data.people.length + ")" : "";
+      panels.followers.innerHTML = data.people.length
+        ? data.people.map(function (p) {
+            var btn = p.iFollowThem
+              ? '<button class="eh-btn eh-btn-ghost-light hub-btn-sm" data-unfollow="' + p.id + '">Unfollow</button>'
+              : '<button class="eh-btn eh-btn-primary hub-btn-sm" data-followback="' + p.id + '">Follow back</button>';
+            return personRow(p, btn);
+          }).join("")
+        : '<div class="hub-empty">No one is following you yet.</div>';
+      wireActions();
+    }).catch(function (err) { H.toast(err.message, true); });
+  }
+
   function wireActions() {
     document.querySelectorAll("[data-accept]").forEach(function (b) {
       b.addEventListener("click", function () { respond(b.dataset.accept, "accepted"); });
@@ -71,6 +96,20 @@
         H.api("connections", { method: "DELETE", query: { id: b.dataset.cancel } }).then(load).catch(function (err) { H.toast(err.message, true); });
       });
     });
+    document.querySelectorAll("[data-unfollow]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        H.api("follows", { method: "DELETE", query: { followeeId: b.dataset.unfollow } })
+          .then(function () { H.toast("Unfollowed"); loadFollows(); })
+          .catch(function (err) { H.toast(err.message, true); });
+      });
+    });
+    document.querySelectorAll("[data-followback]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        H.api("follows", { method: "POST", body: { followeeId: Number(b.dataset.followback) } })
+          .then(function () { H.toast("Following"); loadFollows(); })
+          .catch(function (err) { H.toast(err.message, true); });
+      });
+    });
   }
   function respond(id, status) {
     H.api("connections", { method: "PATCH", body: { id: Number(id), status: status } })
@@ -78,13 +117,17 @@
       .catch(function (err) { H.toast(err.message, true); });
   }
 
+  function activateTab(key) {
+    tabs.forEach(function (t) { t.classList.toggle("is-active", t.dataset.tab === key); });
+    Object.keys(panels).forEach(function (k) { panels[k].hidden = k !== key; });
+  }
   tabs.forEach(function (tab) {
-    tab.addEventListener("click", function () {
-      tabs.forEach(function (t) { t.classList.remove("is-active"); });
-      tab.classList.add("is-active");
-      Object.keys(panels).forEach(function (key) { panels[key].hidden = key !== tab.dataset.tab; });
-    });
+    tab.addEventListener("click", function () { activateTab(tab.dataset.tab); });
   });
 
+  var initialTab = new URLSearchParams(window.location.search).get("tab");
+  if (initialTab && panels[initialTab]) activateTab(initialTab);
+
   load();
+  loadFollows();
 })();

@@ -27,6 +27,20 @@
     if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   }
+  // Presence text is built entirely from a server-computed "seconds ago"
+  // integer, never from parsing a raw timestamp into a client-side Date —
+  // the `engineers.last_active` column has no timezone, so a naive
+  // client-side Date built from it is only correct if the reading
+  // process's own system timezone happens to be UTC (true on Vercel by
+  // default, not guaranteed everywhere, and provably false on at least
+  // one dev machine this project has been tested from).
+  function fmtPresence(isOnline, secondsAgo) {
+    if (isOnline) return "Active now";
+    if (secondsAgo == null) return "";
+    if (secondsAgo < 3600) return "Active " + Math.max(1, Math.floor(secondsAgo / 60)) + "m ago";
+    if (secondsAgo < 86400) return "Active " + Math.floor(secondsAgo / 3600) + "h ago";
+    return "Active " + Math.floor(secondsAgo / 86400) + "d ago";
+  }
 
   function renderConvList(filterText) {
     var filtered = conversations.filter(function (c) {
@@ -61,6 +75,12 @@
       .then(function (data) {
         conversations = data.conversations;
         renderConvList(searchInput.value.trim());
+        // Keep the open thread's "Active now"/"Active Xh ago" line fresh —
+        // conversations carries presence, the messages endpoint doesn't.
+        if (activeOtherId) {
+          var known = conversations.find(function (c) { return c.otherId === activeOtherId; });
+          if (known) renderThreadHeader(known);
+        }
         if (callback) callback();
       })
       .catch(function (err) { listEl.innerHTML = '<div class="hub-empty">' + H.escapeHtml(err.message) + "</div>"; });
@@ -73,6 +93,12 @@
     document.getElementById("msg-thread-avatar").outerHTML = H.avatarHtml(person, "sm").replace('class="hub-avatar', 'id="msg-thread-avatar" class="hub-avatar');
     document.getElementById("msg-thread-name").textContent = person.displayName || "Conversation";
     document.getElementById("msg-thread-role").textContent = role;
+    var isOnline = !!person.isOnline;
+    var presenceEl = document.getElementById("msg-thread-presence");
+    var text = fmtPresence(isOnline, person.lastActiveSecondsAgo);
+    presenceEl.textContent = text;
+    presenceEl.classList.toggle("is-online", !!isOnline);
+    presenceEl.hidden = !text;
   }
 
   function openThread(otherId) {
@@ -89,7 +115,9 @@
       // not in the inbox list yet, so fetch their name/photo directly.
       renderThreadHeader({ displayName: "" });
       H.api("profile", { query: { id: otherId } })
-        .then(function (data) { renderThreadHeader(data.engineer); })
+        .then(function (data) {
+          renderThreadHeader(Object.assign({}, data.engineer, { isOnline: data.isOnline, lastActiveSecondsAgo: data.lastActiveSecondsAgo }));
+        })
         .catch(function () {});
     }
 
@@ -128,26 +156,71 @@
     H.api("typing", { method: "POST", body: { withId: activeOtherId } }).catch(function () {});
   }
 
+  var currentMessages = [];
+  function renderMessages(messages) {
+    currentMessages = messages;
+    bodyEl.innerHTML = messages.length
+      ? messages
+          .map(function (m, i) {
+            // A read receipt on every bubble is noisy and redundant —
+            // only the last message I sent needs one, same as most
+            // chat apps.
+            var isLastMine = m.isMine && !messages.slice(i + 1).some(function (later) { return later.isMine; });
+            var receipt = isLastMine ? '<span class="msg-bubble-receipt' + (m.isRead ? " is-read" : "") + '">' + (m.isRead ? "Read" : "Sent") + "</span>" : "";
+            var edited = m.isEdited ? '<span class="msg-bubble-edited">(edited)</span>' : "";
+            var editBtn = m.isMine ? '<button type="button" class="msg-edit-btn" data-edit-msg="' + m.id + '" aria-label="Edit message">&#9998;</button>' : "";
+            return (
+              '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + '" data-msg-id="' + m.id + '">' +
+              '<div class="msg-bubble-col">' +
+              '<div class="msg-bubble-wrap"><div class="msg-bubble">' + H.escapeHtml(m.content) + "</div>" + editBtn + "</div>" +
+              '<div class="msg-bubble-time">' + edited + "<span>" + fmtTime(m.createdAt) + "</span>" + receipt + "</div></div></div>"
+            );
+          })
+          .join("")
+      : '<div class="hub-empty">No messages yet — say hello.</div>';
+    wireEditButtons();
+  }
+
+  function wireEditButtons() {
+    bodyEl.querySelectorAll("[data-edit-msg]").forEach(function (btn) {
+      btn.onclick = function () { startEditingMessage(Number(btn.dataset.editMsg)); };
+    });
+  }
+
+  function startEditingMessage(id) {
+    var msg = currentMessages.find(function (m) { return m.id === id; });
+    if (!msg) return;
+    var row = bodyEl.querySelector('.msg-bubble-row[data-msg-id="' + id + '"]');
+    var bubbleWrap = row.querySelector(".msg-bubble-wrap");
+    bubbleWrap.innerHTML =
+      '<form class="msg-edit-form">' +
+      '<textarea class="msg-edit-textarea" maxlength="4000">' + H.escapeHtml(msg.content) + "</textarea>" +
+      '<div class="msg-edit-actions"><button type="button" class="msg-edit-cancel">Cancel</button><button type="submit" class="msg-edit-save">Save</button></div>' +
+      "</form>";
+    var textarea = bubbleWrap.querySelector("textarea");
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    bubbleWrap.querySelector(".msg-edit-cancel").addEventListener("click", function () { renderMessages(currentMessages); });
+    bubbleWrap.querySelector(".msg-edit-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var content = textarea.value.trim();
+      if (!content) return;
+      H.api("messages", { method: "PUT", body: { id: id, content: content } })
+        .then(function (d) {
+          var idx = currentMessages.findIndex(function (m) { return m.id === id; });
+          if (idx !== -1) currentMessages[idx] = d.message;
+          renderMessages(currentMessages);
+          loadConversations();
+        })
+        .catch(function (err) { H.toast(err.message, true); });
+    });
+  }
+
   function loadThread(scrollToBottom) {
     if (!activeOtherId) return;
     H.api("messages", { query: { with: activeOtherId } })
       .then(function (data) {
-        bodyEl.innerHTML = data.messages.length
-          ? data.messages
-              .map(function (m, i) {
-                // A read receipt on every bubble is noisy and redundant —
-                // only the last message I sent needs one, same as most
-                // chat apps.
-                var isLastMine = m.isMine && !data.messages.slice(i + 1).some(function (later) { return later.isMine; });
-                var receipt = isLastMine ? '<span class="msg-bubble-receipt' + (m.isRead ? " is-read" : "") + '">' + (m.isRead ? "Read" : "Sent") + "</span>" : "";
-                return (
-                  '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + '">' +
-                  '<div class="msg-bubble-col"><div class="msg-bubble">' + H.escapeHtml(m.content) + "</div>" +
-                  '<div class="msg-bubble-time"><span>' + fmtTime(m.createdAt) + "</span>" + receipt + "</div></div></div>"
-                );
-              })
-              .join("")
-          : '<div class="hub-empty">No messages yet — say hello.</div>';
+        renderMessages(data.messages);
         if (scrollToBottom || isShowingTyping) bodyEl.scrollTop = bodyEl.scrollHeight;
         loadConversations(); // refresh unread counts/previews in the list
       })

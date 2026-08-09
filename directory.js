@@ -74,5 +74,7 @@
   sortSelect.addEventListener("change", function () { search(true); });
   loadMoreBtn.addEventListener("click", function () { search(false); });
 
+  var urlQuery = new URLSearchParams(window.location.search).get("q");
+  if (urlQuery) searchInput.value = urlQuery;
   search(true);
 })();

@@ -74,6 +74,15 @@
       connLink.style.cursor = "default";
     }
 
+    var followersLink = document.getElementById("pf-followers-count");
+    followersLink.textContent = (state.followersCount || 0) + " follower" + (state.followersCount === 1 ? "" : "s");
+    if (state.isSelf) {
+      followersLink.href = "/connections.html?tab=followers";
+    } else {
+      followersLink.removeAttribute("href");
+      followersLink.style.cursor = "default";
+    }
+
     document.getElementById("pf-open-to-work-badge").hidden = !e.openToWork;
 
     var otwRow = document.getElementById("pf-otw-row");
@@ -81,6 +90,7 @@
     if (state.isSelf) document.getElementById("pf-otw-toggle").checked = !!e.openToWork;
 
     renderHeaderActions();
+    renderProfileViews();
     renderAbout();
     renderExperience();
     renderEducation();
@@ -99,22 +109,26 @@
     var wrap = document.getElementById("pf-header-actions");
     if (state.isSelf) { wrap.innerHTML = ""; return; }
     var status = state.connectionStatus;
+    var followBtn = '<button id="pf-follow-btn" class="eh-btn eh-btn-ghost-light hub-btn-sm">' + (state.isFollowing ? "Following ✓" : "+ Follow") + "</button>";
     if (status === "accepted") {
       wrap.innerHTML =
         '<span class="eh-btn eh-btn-ghost-light" style="cursor:default;">Connected ✓</span>' +
+        followBtn +
         '<a href="/messages.html?with=' + state.engineer.id + '" class="eh-btn eh-btn-primary hub-btn-sm">Message</a>';
     } else if (status === "pending" && state.isIncomingRequest) {
       wrap.innerHTML =
         '<button id="pf-accept-btn" class="eh-btn eh-btn-primary hub-btn-sm">Accept</button>' +
-        '<button id="pf-decline-btn" class="eh-btn eh-btn-ghost-light hub-btn-sm">Decline</button>';
+        '<button id="pf-decline-btn" class="eh-btn eh-btn-ghost-light hub-btn-sm">Decline</button>' +
+        followBtn;
       document.getElementById("pf-accept-btn").addEventListener("click", function () { respondConnection("accepted"); });
       document.getElementById("pf-decline-btn").addEventListener("click", function () { respondConnection("declined"); });
     } else if (status === "pending") {
-      wrap.innerHTML = '<span class="eh-btn eh-btn-ghost-light" style="cursor:default;">Request pending</span>';
+      wrap.innerHTML = '<span class="eh-btn eh-btn-ghost-light" style="cursor:default;">Request pending</span>' + followBtn;
     } else {
-      wrap.innerHTML = '<button id="pf-connect-btn" class="eh-btn eh-btn-primary hub-btn-sm">+ Connect</button>';
+      wrap.innerHTML = '<button id="pf-connect-btn" class="eh-btn eh-btn-primary hub-btn-sm">+ Connect</button>' + followBtn;
       document.getElementById("pf-connect-btn").addEventListener("click", sendConnection);
     }
+    document.getElementById("pf-follow-btn").addEventListener("click", toggleFollow);
   }
 
   function sendConnection() {
@@ -125,6 +139,20 @@
   function respondConnection(status) {
     H.api("connections", { method: "PATCH", body: { id: state.connectionId, status: status } })
       .then(function () { H.toast(status === "accepted" ? "Connected!" : "Request declined"); load(); })
+      .catch(function (err) { H.toast(err.message, true); });
+  }
+  function toggleFollow() {
+    var wasFollowing = state.isFollowing;
+    var req = wasFollowing
+      ? H.api("follows", { method: "DELETE", query: { followeeId: state.engineer.id } })
+      : H.api("follows", { method: "POST", body: { followeeId: state.engineer.id } });
+    req
+      .then(function () {
+        H.toast(wasFollowing ? "Unfollowed" : "Now following " + state.engineer.displayName);
+        state.isFollowing = !wasFollowing;
+        state.followersCount = (state.followersCount || 0) + (wasFollowing ? -1 : 1);
+        renderHeaderActions();
+      })
       .catch(function (err) { H.toast(err.message, true); });
   }
 
@@ -170,6 +198,34 @@
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     });
+  }
+
+  // ---------- Profile views (self only) ----------
+  function renderProfileViews() {
+    var card = document.getElementById("pf-views-card");
+    if (!state.isSelf) { card.hidden = true; return; }
+    card.hidden = false;
+    document.getElementById("pf-views-count").textContent = state.profileViewsCount || 0;
+    var list = document.getElementById("pf-views-list");
+    var viewers = state.profileViewers || [];
+    if (!viewers.length) {
+      list.innerHTML = '<div class="hub-empty" style="padding:4px 0;">No one has viewed your profile yet.</div>';
+      return;
+    }
+    list.innerHTML = viewers
+      .map(function (v) {
+        var role = [v.title, v.company].filter(Boolean).join(" at ");
+        return (
+          '<a href="/profile.html?id=' + v.id + '" class="pf-views-item" style="color:inherit;">' +
+          H.avatarHtml({ displayName: v.displayName, profilePhoto: v.profilePhoto }, "sm") +
+          '<div class="info"><h4>' + H.escapeHtml(v.displayName) + "</h4>" +
+          (role ? "<p>" + H.escapeHtml(role) + "</p>" : "") +
+          "</div>" +
+          "<time>" + H.timeAgo(v.viewedAt) + "</time>" +
+          "</a>"
+        );
+      })
+      .join("");
   }
 
   // ---------- About ----------

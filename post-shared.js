@@ -40,9 +40,22 @@ window.HubPosts = (function () {
     );
   }
 
-  function mediaHtml(imageUrl, videoUrl) {
-    var img = imageUrl ? '<div class="feed-post-image"><img src="' + H.escapeHtml(imageUrl) + '" alt="" data-lightbox-img="' + H.escapeHtml(imageUrl) + '" /></div>' : "";
+  function mediaHtml(imageUrl, videoUrl, imageUrls) {
     var vid = videoUrl ? '<div class="feed-post-video"><video src="' + H.escapeHtml(videoUrl) + '" controls playsinline preload="metadata"></video></div>' : "";
+    if (imageUrls && imageUrls.length > 1) {
+      var slides = imageUrls
+        .map(function (url) { return '<div class="feed-post-carousel-slide"><img src="' + H.escapeHtml(url) + '" alt="" /></div>'; })
+        .join("");
+      var dots = imageUrls.map(function (_, i) { return '<span class="' + (i === 0 ? "is-active" : "") + '"></span>'; }).join("");
+      return (
+        '<div class="feed-post-carousel" data-carousel>' +
+        '<div class="feed-post-carousel-track">' + slides + "</div>" +
+        '<div class="feed-post-carousel-dots">' + dots + "</div>" +
+        "</div>" + vid
+      );
+    }
+    var singleUrl = imageUrls && imageUrls.length === 1 ? imageUrls[0] : imageUrl;
+    var img = singleUrl ? '<div class="feed-post-image"><img src="' + H.escapeHtml(singleUrl) + '" alt="" data-lightbox-img="' + H.escapeHtml(singleUrl) + '" /></div>' : "";
     return img + vid;
   }
 
@@ -61,7 +74,7 @@ window.HubPosts = (function () {
     var repostHtml = p.repostOf
       ? '<div class="feed-repost-box"><div class="head">' + H.avatarHtml(p.repostOf, "sm") + '<h5>' + H.escapeHtml(p.repostOf.authorName) + '</h5></div>' +
         (p.repostOf.content ? '<p>' + H.escapeHtml(p.repostOf.content) + '</p>' : "") +
-        mediaHtml(p.repostOf.imageUrl, p.repostOf.videoUrl) +
+        mediaHtml(p.repostOf.imageUrl, p.repostOf.videoUrl, p.repostOf.imageUrls) +
         "</div>"
       : "";
 
@@ -78,7 +91,7 @@ window.HubPosts = (function () {
       (p.isPinned ? '<div class="feed-pinned-tag">📌 Pinned</div>' : "") +
       (p.repostOf ? '<div class="feed-repost-tag">&#8635; ' + (p.isMine ? "You reposted" : H.escapeHtml(p.authorName) + " reposted") + "</div>" : "") +
       (p.content ? '<p class="feed-post-content">' + H.escapeHtml(p.content) + "</p>" : "") +
-      mediaHtml(p.imageUrl, p.videoUrl) + repostHtml +
+      mediaHtml(p.imageUrl, p.videoUrl, p.imageUrls) + repostHtml +
       '<div class="feed-post-stats">' +
       reactionSummaryHtml(p) +
       (p.commentCount ? '<button type="button" class="feed-stat-link" data-comment-toggle="' + p.id + '">' + p.commentCount + " comment" + (p.commentCount === 1 ? "" : "s") + "</button>" : '<span></span>') +
@@ -299,6 +312,21 @@ window.HubPosts = (function () {
 
     containerEl.querySelectorAll("[data-lightbox-img]").forEach(function (img) {
       img.onclick = function () { H.openLightbox([{ type: "image", url: img.dataset.lightboxImg }], 0); };
+    });
+
+    containerEl.querySelectorAll("[data-carousel]").forEach(function (carousel) {
+      var track = carousel.querySelector(".feed-post-carousel-track");
+      var imgs = Array.prototype.slice.call(track.querySelectorAll("img"));
+      var dots = carousel.querySelectorAll(".feed-post-carousel-dots span");
+      imgs.forEach(function (img, i) {
+        img.onclick = function () {
+          H.openLightbox(imgs.map(function (im) { return { type: "image", url: im.src }; }), i);
+        };
+      });
+      track.addEventListener("scroll", function () {
+        var idx = Math.round(track.scrollLeft / track.clientWidth);
+        dots.forEach(function (d, i) { d.classList.toggle("is-active", i === idx); });
+      });
     });
   }
 

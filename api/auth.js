@@ -10,9 +10,9 @@ import { applyCors, sendError } from "./_utils.js";
 // no build error, exactly as documented there.
 //
 // Actions: login, logout, me, update-profile, upload-photo,
-// work-experience, education, skills, directory, connections, feed,
-// jobs, profile, dashboard, toggle-open-to-work, conversations, messages,
-// admin-login, admin-logout, admin-me, admin-engineers, admin-import.
+// work-experience, education, skills, directory, connections, follows,
+// feed, jobs, profile, dashboard, toggle-open-to-work, conversations,
+// messages, admin-login, admin-logout, admin-me, admin-engineers, admin-import.
 //
 // KNOWN GAP, documented rather than hidden (same convention as the
 // voting system's own README "Security note" and the original login
@@ -122,6 +122,7 @@ function privateEngineer(e) {
     githubUrl: e.github_url,
     portfolioUrl: e.portfolio_url,
     lastLogin: e.last_login,
+    lastActive: e.last_active,
     openToWork: !!e.open_to_work,
     verified: true,
   };
@@ -518,7 +519,7 @@ export default async function handler(req, res) {
                COUNT(*) OVER() AS total_count
         FROM engineers
         WHERE (${q}::text = '' OR display_name ILIKE ${like} OR name ILIKE ${like}
-               OR company ILIKE ${like} OR iek_number ILIKE ${like})
+               OR company ILIKE ${like} OR iek_number ILIKE ${like} OR title ILIKE ${like})
           AND (${discipline}::text = '' OR discipline = ${discipline})
         ORDER BY ${sort === "recent" ? sql`last_login DESC NULLS LAST` : sql`COALESCE(display_name, name) ASC`}
         LIMIT ${limit} OFFSET ${offset}
@@ -750,7 +751,7 @@ export default async function handler(req, res) {
                  EXISTS(SELECT 1 FROM saved_posts WHERE post_id = p.id AND engineer_id = ${session.id}) AS is_saved,
                  (SELECT json_object_agg(reaction_type, cnt) FROM (SELECT reaction_type, COUNT(*) AS cnt FROM reactions WHERE post_id = p.id GROUP BY reaction_type) rc) AS reaction_summary,
                  (SELECT COUNT(*) FROM reactions WHERE post_id = p.id) AS reaction_count,
-                 orig.id AS orig_id, orig.content AS orig_content, orig.image_url AS orig_image_url, orig.video_url AS orig_video_url, orig.created_at AS orig_created_at,
+                 orig.id AS orig_id, orig.content AS orig_content, orig.image_url AS orig_image_url, orig.image_urls AS orig_image_urls, orig.video_url AS orig_video_url, orig.created_at AS orig_created_at,
                  oe.display_name AS orig_author_display_name, oe.name AS orig_author_name, oe.profile_photo AS orig_author_photo, orig.author_id AS orig_author_id
           FROM posts p
           JOIN engineers e ON e.id = p.author_id
@@ -772,6 +773,7 @@ export default async function handler(req, res) {
             authorPhoto: p.author_photo,
             content: p.content,
             imageUrl: p.image_url,
+            imageUrls: p.image_urls && p.image_urls.length ? p.image_urls : null,
             videoUrl: p.video_url,
             createdAt: p.created_at,
             isPinned: p.is_pinned,
@@ -782,7 +784,17 @@ export default async function handler(req, res) {
             myReaction: p.my_reaction,
             isMine: p.author_id === session.id,
             repostOf: p.orig_id
-              ? { id: p.orig_id, content: p.orig_content, imageUrl: p.orig_image_url, videoUrl: p.orig_video_url, createdAt: p.orig_created_at, authorId: p.orig_author_id, authorName: p.orig_author_display_name || p.orig_author_name, authorPhoto: p.orig_author_photo }
+              ? {
+                  id: p.orig_id,
+                  content: p.orig_content,
+                  imageUrl: p.orig_image_url,
+                  imageUrls: p.orig_image_urls && p.orig_image_urls.length ? p.orig_image_urls : null,
+                  videoUrl: p.orig_video_url,
+                  createdAt: p.orig_created_at,
+                  authorId: p.orig_author_id,
+                  authorName: p.orig_author_display_name || p.orig_author_name,
+                  authorPhoto: p.orig_author_photo,
+                }
               : null,
           })),
         });
@@ -795,12 +807,17 @@ export default async function handler(req, res) {
         const b = req.body || {};
         const content = String(b.content || "").trim().slice(0, 3000);
         const repostedFromId = b.repostedFromId ? Number(b.repostedFromId) : null;
-        if (!content && !b.imageUrl && !b.videoUrl && !repostedFromId) {
+        // imageUrls (plural, from a multi-photo post) and imageUrl (singular,
+        // from every older client/repost path) are mutually exclusive — a
+        // post with more than one photo doesn't also set the singular column.
+        const imageUrls = Array.isArray(b.imageUrls) ? b.imageUrls.filter(Boolean).slice(0, 10) : [];
+        const imageUrl = imageUrls.length ? null : b.imageUrl || null;
+        if (!content && !imageUrl && !imageUrls.length && !b.videoUrl && !repostedFromId) {
           return res.status(400).json({ error: "Write something, add media, or repost something." });
         }
         const [row] = await sql`
-          INSERT INTO posts (author_id, content, image_url, video_url, reposted_from_id)
-          VALUES (${session.id}, ${content || null}, ${b.imageUrl || null}, ${b.videoUrl || null}, ${repostedFromId})
+          INSERT INTO posts (author_id, content, image_url, image_urls, video_url, reposted_from_id)
+          VALUES (${session.id}, ${content || null}, ${imageUrl}, ${imageUrls.length ? imageUrls : null}, ${b.videoUrl || null}, ${repostedFromId})
           RETURNING *
         `;
         await logActivity(sql, session.id, repostedFromId ? "reposted" : "posted", `${session.display_name || session.name} ${repostedFromId ? "reposted an update" : "shared an update"}`);
@@ -1003,31 +1020,124 @@ export default async function handler(req, res) {
       const id = Number(req.query.id) || session.id;
       const [target] = id === session.id ? [session] : await sql`SELECT * FROM engineers WHERE id = ${id}`;
       if (!target) return res.status(404).json({ error: "Profile not found." });
+      const isSelf = id === session.id;
 
-      const [experience, education, skills, connectionRow, connCount] = await Promise.all([
+      // A view only counts when someone else looks at your profile —
+      // upsert so re-visiting bumps the timestamp instead of piling up
+      // duplicate rows for "who viewed your profile".
+      if (!isSelf) {
+        sql`
+          INSERT INTO profile_views (viewer_id, viewed_id) VALUES (${session.id}, ${id})
+          ON CONFLICT (viewer_id, viewed_id) DO UPDATE SET created_at = CURRENT_TIMESTAMP
+        `.catch(() => {});
+      }
+
+      const [experience, education, skills, connectionRow, connCount, followRow, followersCount, followingCount, viewersRows, viewersCount, presenceRow] = await Promise.all([
         sql`SELECT * FROM work_experience WHERE engineer_id = ${id} ORDER BY is_current DESC, start_date DESC NULLS LAST`,
         sql`SELECT * FROM education WHERE engineer_id = ${id} ORDER BY end_year DESC NULLS FIRST`,
         sql`SELECT * FROM skills WHERE engineer_id = ${id} ORDER BY skill_name ASC`,
-        id === session.id
+        isSelf
           ? Promise.resolve([null])
           : sql`SELECT id, status, requester_id FROM connections WHERE (requester_id = ${session.id} AND addressee_id = ${id}) OR (requester_id = ${id} AND addressee_id = ${session.id})`,
         sql`SELECT COUNT(*) FROM connections WHERE status = 'accepted' AND (requester_id = ${id} OR addressee_id = ${id})`,
+        isSelf ? Promise.resolve([null]) : sql`SELECT id FROM follows WHERE follower_id = ${session.id} AND followee_id = ${id}`,
+        sql`SELECT COUNT(*) FROM follows WHERE followee_id = ${id}`,
+        sql`SELECT COUNT(*) FROM follows WHERE follower_id = ${id}`,
+        isSelf
+          ? sql`
+              SELECT v.created_at, e.id, e.display_name, e.name, e.title, e.company, e.profile_photo
+              FROM profile_views v JOIN engineers e ON e.id = v.viewer_id
+              WHERE v.viewed_id = ${id} ORDER BY v.created_at DESC LIMIT 20
+            `
+          : Promise.resolve([]),
+        isSelf ? sql`SELECT COUNT(*) FROM profile_views WHERE viewed_id = ${id}` : Promise.resolve([{ count: 0 }]),
+        sql`SELECT (last_active > NOW() - INTERVAL '5 minutes') AS is_online, EXTRACT(EPOCH FROM (NOW() - last_active))::int AS seconds_ago FROM engineers WHERE id = ${id}`,
       ]);
 
-      const isSelf = id === session.id;
       const conn = connectionRow[0];
+      const presence = presenceRow[0] || {};
 
       return res.status(200).json({
         engineer: isSelf ? privateEngineer(target) : publicEngineer(target),
         isSelf,
+        isOnline: !!presence.is_online,
+        lastActiveSecondsAgo: presence.seconds_ago != null ? Number(presence.seconds_ago) : null,
         connectionsCount: Number(connCount[0].count),
         connectionStatus: isSelf ? null : conn ? conn.status : "none",
         connectionId: conn ? conn.id : null,
         isIncomingRequest: conn && conn.status === "pending" && conn.requester_id !== session.id,
+        isFollowing: !isSelf && followRow.length > 0,
+        followersCount: Number(followersCount[0].count),
+        followingCount: Number(followingCount[0].count),
+        profileViewsCount: Number(viewersCount[0].count),
+        profileViewers: viewersRows.map((v) => ({
+          viewedAt: v.created_at,
+          id: v.id,
+          displayName: v.display_name || v.name,
+          title: v.title,
+          company: v.company,
+          profilePhoto: v.profile_photo,
+        })),
         experience,
         education,
         skills,
       });
+    }
+
+    if (action === "follows") {
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      if (req.method === "POST") {
+        const followeeId = Number((req.body || {}).followeeId);
+        if (!followeeId || followeeId === session.id) return res.status(400).json({ error: "Invalid engineer to follow." });
+        await sql`INSERT INTO follows (follower_id, followee_id) VALUES (${session.id}, ${followeeId}) ON CONFLICT DO NOTHING`;
+        await notify(sql, followeeId, session.id, "follow", "profile", session.id);
+        return res.status(201).json({ following: true });
+      }
+
+      if (req.method === "DELETE") {
+        const followeeId = Number(req.query.followeeId || (req.body || {}).followeeId);
+        if (!followeeId) return res.status(400).json({ error: "followeeId is required." });
+        await sql`DELETE FROM follows WHERE follower_id = ${session.id} AND followee_id = ${followeeId}`;
+        return res.status(200).json({ following: false });
+      }
+
+      if (req.method === "GET") {
+        // type=followers -> people who follow the given engineer (default: me)
+        // type=following -> people the given engineer follows
+        const ofId = Number(req.query.id) || session.id;
+        const type = req.query.type === "following" ? "following" : "followers";
+        const rows =
+          type === "followers"
+            ? await sql`
+                SELECT e.id, e.display_name, e.name, e.title, e.company, e.profile_photo, f.created_at,
+                       EXISTS(SELECT 1 FROM follows WHERE follower_id = ${session.id} AND followee_id = e.id) AS i_follow_them
+                FROM follows f JOIN engineers e ON e.id = f.follower_id
+                WHERE f.followee_id = ${ofId} ORDER BY f.created_at DESC
+              `
+            : await sql`
+                SELECT e.id, e.display_name, e.name, e.title, e.company, e.profile_photo, f.created_at,
+                       EXISTS(SELECT 1 FROM follows WHERE follower_id = ${session.id} AND followee_id = e.id) AS i_follow_them
+                FROM follows f JOIN engineers e ON e.id = f.followee_id
+                WHERE f.follower_id = ${ofId} ORDER BY f.created_at DESC
+              `;
+        return res.status(200).json({
+          type,
+          people: rows.map((r) => ({
+            id: r.id,
+            displayName: r.display_name || r.name,
+            title: r.title,
+            company: r.company,
+            profilePhoto: r.profile_photo,
+            since: r.created_at,
+            iFollowThem: r.i_follow_them,
+          })),
+        });
+      }
+
+      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
     }
 
     if (action === "toggle-open-to-work") {
@@ -1074,7 +1184,20 @@ export default async function handler(req, res) {
       let people = {};
       if (rows.length) {
         const ids = rows.map((r) => r.other_id);
-        const list = await sql`SELECT id, display_name, name, title, company, profile_photo FROM engineers WHERE id = ANY(${ids})`;
+        // Presence is computed entirely in SQL — never send a naive
+        // TIMESTAMP-column value for the client to parse into a Date.
+        // TIMESTAMP (no timezone) columns get interpreted using
+        // whatever timezone the reading process happens to be running
+        // in, which is fine on Vercel (UTC) but silently wrong on a
+        // dev machine set to a non-UTC zone — exactly the bug class
+        // that broke the typing indicator earlier. A plain integer
+        // "seconds ago" has no timezone to get wrong.
+        const list = await sql`
+          SELECT id, display_name, name, title, company, profile_photo,
+                 (last_active > NOW() - INTERVAL '5 minutes') AS is_online,
+                 EXTRACT(EPOCH FROM (NOW() - last_active))::int AS last_active_seconds_ago
+          FROM engineers WHERE id = ANY(${ids})
+        `;
         people = Object.fromEntries(list.map((p) => [p.id, p]));
       }
 
@@ -1086,6 +1209,8 @@ export default async function handler(req, res) {
           title: people[r.other_id]?.title,
           company: people[r.other_id]?.company,
           profilePhoto: people[r.other_id]?.profile_photo,
+          lastActiveSecondsAgo: people[r.other_id] ? Number(people[r.other_id].last_active_seconds_ago) : null,
+          isOnline: !!people[r.other_id]?.is_online,
           lastMessage: r.last_content,
           lastMessageIsMine: r.last_sender_id === session.id,
           lastMessageAt: r.last_message_at,
@@ -1111,14 +1236,38 @@ export default async function handler(req, res) {
         if (!conv) return res.status(200).json({ conversationId: null, messages: [] });
 
         const messages = await sql`
-          SELECT id, sender_id, content, is_read, created_at FROM messages
+          SELECT id, sender_id, content, is_read, created_at, edited_at FROM messages
           WHERE conversation_id = ${conv.id} ORDER BY created_at ASC LIMIT 200
         `;
         sql`UPDATE messages SET is_read = TRUE WHERE conversation_id = ${conv.id} AND sender_id != ${session.id} AND is_read = FALSE`.catch(() => {});
 
         return res.status(200).json({
           conversationId: conv.id,
-          messages: messages.map((m) => ({ id: m.id, senderId: m.sender_id, content: m.content, isRead: m.is_read, createdAt: m.created_at, isMine: m.sender_id === session.id })),
+          messages: messages.map((m) => ({
+            id: m.id,
+            senderId: m.sender_id,
+            content: m.content,
+            isRead: m.is_read,
+            createdAt: m.created_at,
+            isEdited: !!m.edited_at,
+            isMine: m.sender_id === session.id,
+          })),
+        });
+      }
+
+      if (req.method === "PUT") {
+        const b = req.body || {};
+        const id = Number(b.id);
+        const content = String(b.content || "").trim().slice(0, 4000);
+        if (!id || !content) return res.status(400).json({ error: "Message content can't be empty." });
+        const [updated] = await sql`
+          UPDATE messages SET content = ${content}, edited_at = CURRENT_TIMESTAMP
+          WHERE id = ${id} AND sender_id = ${session.id}
+          RETURNING id, sender_id, content, is_read, created_at, edited_at
+        `;
+        if (!updated) return res.status(404).json({ error: "Message not found." });
+        return res.status(200).json({
+          message: { id: updated.id, senderId: updated.sender_id, content: updated.content, isRead: updated.is_read, createdAt: updated.created_at, isEdited: true, isMine: true },
         });
       }
 
@@ -1151,10 +1300,10 @@ export default async function handler(req, res) {
         // up to TYPING_WINDOW_MS after the message already arrived.
         await sql`UPDATE conversations SET typing_by = NULL, typing_until = NULL WHERE id = ${conv.id}`;
         await notify(sql, otherId, session.id, "message", "conversation", conv.id);
-        return res.status(201).json({ conversationId: conv.id, message: { id: message.id, senderId: message.sender_id, content: message.content, isRead: message.is_read, createdAt: message.created_at, isMine: true } });
+        return res.status(201).json({ conversationId: conv.id, message: { id: message.id, senderId: message.sender_id, content: message.content, isRead: message.is_read, createdAt: message.created_at, isEdited: false, isMine: true } });
       }
 
-      res.setHeader("Allow", "GET, POST, OPTIONS");
+      res.setHeader("Allow", "GET, POST, PUT, OPTIONS");
       return res.status(405).json({ error: "Method not allowed." });
     }
 
@@ -1228,7 +1377,7 @@ export default async function handler(req, res) {
           if (new Date(r.created_at) > new Date(g.latestCreatedAt)) g.latestCreatedAt = r.created_at;
         }
 
-        const verb = { reaction: "reacted to your post", comment: "commented on your post", repost: "reposted your post", connection_request: "sent you a connection request", connection_accepted: "accepted your connection request", message: "sent you a message" };
+        const verb = { reaction: "reacted to your post", comment: "commented on your post", repost: "reposted your post", connection_request: "sent you a connection request", connection_accepted: "accepted your connection request", message: "sent you a message", follow: "started following you" };
 
         const notifications = order.map((key) => {
           const g = groups.get(key);
@@ -1539,7 +1688,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import.",
     });
   } catch (err) {
     return sendError(res, err);

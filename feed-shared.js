@@ -14,8 +14,8 @@
   var currentSort = "recent";
   var offset = 0;
   var LIMIT = 15;
-  var pendingImageFile = null;
-  var pendingImageUrl = null;
+  var MAX_IMAGES = 10;
+  var pendingImageFiles = [];
   var pendingVideoFile = null;
   var pendingVideoUrl = null;
   var me = null;
@@ -43,17 +43,36 @@
     openBtn.parentElement.hidden = false;
     textarea.value = "";
     charCount.textContent = "0 / 3000";
-    pendingImageFile = null;
-    pendingImageUrl = null;
+    pendingImageFiles = [];
     pendingVideoFile = null;
     pendingVideoUrl = null;
-    imagePreview.hidden = true;
+    renderImagePreviews();
     imageInput.value = "";
     cameraInput.value = "";
     videoPreview.hidden = true;
     videoInput.value = "";
   }
   textarea.addEventListener("input", function () { charCount.textContent = textarea.value.length + " / 3000"; });
+
+  function renderImagePreviews() {
+    if (!pendingImageFiles.length) {
+      imagePreview.hidden = true;
+      imagePreview.innerHTML = "";
+      return;
+    }
+    imagePreview.hidden = false;
+    imagePreview.innerHTML = pendingImageFiles
+      .map(function (item, i) {
+        return '<div class="feed-composer-image-thumb"><img src="' + item.dataUrl + '" alt="" /><button type="button" data-remove-image="' + i + '">&times;</button></div>';
+      })
+      .join("");
+    imagePreview.querySelectorAll("[data-remove-image]").forEach(function (btn) {
+      btn.onclick = function () {
+        pendingImageFiles.splice(Number(btn.dataset.removeImage), 1);
+        renderImagePreviews();
+      };
+    });
+  }
 
   // A single <input accept="image/*"> can't reliably offer both "take a
   // new photo" and "choose an existing one" — capture="environment"
@@ -63,31 +82,35 @@
   // chooser, whose "Camera" shortcut is inconsistently reliable across
   // Android OEM skins. Two separate inputs, one with capture and one
   // without, sidesteps that instead of gambling on either alone — both
-  // funnel into the same pending-image handling.
-  function onImagePicked(file) {
-    if (!file) return;
+  // funnel into the same pending-image handling. A post can carry more
+  // than one photo (rendered as a swipeable carousel), so picking more
+  // images adds to the pending set instead of replacing it.
+  function onImagesPicked(files) {
+    if (!files || !files.length) return;
     pendingVideoFile = null;
     videoPreview.hidden = true;
     videoInput.value = "";
-    pendingImageFile = file;
-    var reader = new FileReader();
-    reader.onload = function (e) { imagePreviewImg.src = e.target.result; imagePreview.hidden = false; };
-    reader.readAsDataURL(file);
+    var room = MAX_IMAGES - pendingImageFiles.length;
+    if (room <= 0) return H.toast("You can add up to " + MAX_IMAGES + " photos per post.", true);
+    var toAdd = Array.prototype.slice.call(files, 0, room);
+    if (files.length > toAdd.length) H.toast("Only added " + toAdd.length + " — up to " + MAX_IMAGES + " photos per post.", true);
+    toAdd.forEach(function (file) {
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        pendingImageFiles.push({ file: file, dataUrl: e.target.result });
+        renderImagePreviews();
+      };
+      reader.readAsDataURL(file);
+    });
   }
   var cameraInput = document.getElementById("composer-camera-input");
-  imageInput.addEventListener("change", function () { onImagePicked(imageInput.files[0]); });
-  cameraInput.addEventListener("change", function () { onImagePicked(cameraInput.files[0]); });
-  document.getElementById("composer-image-remove").addEventListener("click", function () {
-    pendingImageFile = null;
-    imagePreview.hidden = true;
-    imageInput.value = "";
-    cameraInput.value = "";
-  });
+  imageInput.addEventListener("change", function () { onImagesPicked(imageInput.files); });
+  cameraInput.addEventListener("change", function () { onImagesPicked(cameraInput.files); });
   videoInput.addEventListener("change", function () {
     var file = videoInput.files[0];
     if (!file) return;
-    pendingImageFile = null;
-    imagePreview.hidden = true;
+    pendingImageFiles = [];
+    renderImagePreviews();
     imageInput.value = "";
     cameraInput.value = "";
     pendingVideoFile = file;
@@ -103,27 +126,41 @@
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var content = textarea.value.trim();
-    if (!content && !pendingImageFile && !pendingVideoFile) return H.toast("Write something or add media.", true);
+    if (!content && !pendingImageFiles.length && !pendingVideoFile) return H.toast("Write something or add media.", true);
     var submitBtn = document.getElementById("composer-submit");
     var originalSubmitLabel = submitBtn.textContent;
     submitBtn.disabled = true;
 
+    var uploadedImageUrls = [];
     var uploadStep;
-    if (pendingImageFile) {
-      uploadStep = H.compressImage(pendingImageFile, 1600, 0.82).then(function (compressed) {
-        submitBtn.textContent = "Uploading…";
-        return H.api("upload-post-image", { method: "POST", headers: { "Content-Type": compressed.type || "image/jpeg" }, body: compressed });
-      }).then(function (d) { pendingImageUrl = d.url; submitBtn.textContent = originalSubmitLabel; });
+    if (pendingImageFiles.length) {
+      var uploadedSoFar = 0;
+      uploadStep = Promise.all(
+        pendingImageFiles.map(function (item) {
+          return H.compressImage(item.file, 1600, 0.82)
+            .then(function (compressed) { return H.api("upload-post-image", { method: "POST", headers: { "Content-Type": compressed.type || "image/jpeg" }, body: compressed }); })
+            .then(function (d) {
+              uploadedSoFar += 1;
+              submitBtn.textContent = "Uploading " + uploadedSoFar + "/" + pendingImageFiles.length + "…";
+              return d.url;
+            });
+        })
+      ).then(function (urls) { uploadedImageUrls = urls; });
     } else if (pendingVideoFile) {
       submitBtn.textContent = "Uploading…";
       uploadStep = H.api("upload-post-video", { method: "POST", headers: { "Content-Type": pendingVideoFile.type || "video/mp4" }, body: pendingVideoFile })
-        .then(function (d) { pendingVideoUrl = d.url; submitBtn.textContent = originalSubmitLabel; });
+        .then(function (d) { pendingVideoUrl = d.url; });
     } else {
       uploadStep = Promise.resolve();
     }
 
     uploadStep
-      .then(function () { return H.api("posts", { method: "POST", body: { content: content, imageUrl: pendingImageUrl, videoUrl: pendingVideoUrl } }); })
+      .then(function () {
+        var body = { content: content, videoUrl: pendingVideoUrl };
+        if (uploadedImageUrls.length === 1) body.imageUrl = uploadedImageUrls[0];
+        else if (uploadedImageUrls.length > 1) body.imageUrls = uploadedImageUrls;
+        return H.api("posts", { method: "POST", body: body });
+      })
       .then(function () {
         resetComposer();
         loadPosts(true);
