@@ -28,9 +28,13 @@ const SESSION_DAYS = 30;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
 // No client-side video compression (Canvas can't touch video, and
 // re-encoding video server-side needs ffmpeg, which isn't available
-// in this runtime) — this cap is the only size control, so it's
-// deliberately tighter than the photo one.
-const MAX_VIDEO_BYTES = 40 * 1024 * 1024; // 40MB
+// in this runtime) — this cap is the only size control. Set just under
+// Vercel's own 100MB request-body ceiling so a too-large upload gets
+// this action's own clear error message instead of a raw platform
+// rejection; still generous enough for a real few-minute phone video
+// (40MB was unrealistically tight — a 1080p clip from a modern phone
+// blows past that in under 30 seconds).
+const MAX_VIDEO_BYTES = 95 * 1024 * 1024; // 95MB
 const REACTION_TYPES = ["like", "love", "celebrate", "laugh", "wow", "sad", "angry"];
 const TYPING_WINDOW_MS = 8000;
 

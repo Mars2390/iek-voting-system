@@ -105,7 +105,7 @@
 .pf-skill-form { display: none; gap: 8px; margin-top: 12px; }
 .pf-skill-form.is-open { display: flex; }
 .pf-skill-form input {
-  flex: 1; font-family: var(--font-body); font-size: 14px;
+  flex: 1; font-family: var(--font-body); font-size: 16px;
   padding: 9px 14px; border-radius: 10px; border: 1.5px solid var(--border);
   background: var(--bg); color: var(--ink); outline: none;
 }

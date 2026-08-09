@@ -24,7 +24,9 @@ body { background: var(--bg); padding-bottom: 0; }
 @media (max-width: 859px) {
   .mobile-tabbar { display: flex; }
   body { padding-bottom: 62px; }
-  .msg-shell { height: calc(100vh - 64px - 62px); }
+  /* .msg-shell's own mobile height (accounting for this tab bar) lives in
+     messages.css, which loads after this file — a duplicate rule here
+     would silently lose that cascade tie and go stale. */
 }
 
 .db-nav {
@@ -118,7 +120,7 @@ body { background: var(--bg); padding-bottom: 0; }
 @media (min-width: 860px) { .nav-search-panel { width: 380px; } }
 .nav-search-input-wrap { padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .nav-search-input-wrap input {
-  width: 100%; font-family: var(--font-body); font-size: 14px;
+  width: 100%; font-family: var(--font-body); font-size: 16px;
   padding: 9px 14px; border-radius: 999px; border: 1.5px solid var(--border);
   background: var(--bg); color: var(--ink); outline: none;
 }

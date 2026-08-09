@@ -11,6 +11,13 @@
   var bodyEl = document.getElementById("msg-thread-body");
   var sendForm = document.getElementById("msg-send-form");
   var inputEl = document.getElementById("msg-input");
+  var msgShell = document.querySelector(".msg-shell");
+  var backBtn = document.getElementById("msg-back-btn");
+  // Below this width the inbox list and the open thread can't fit side by
+  // side (matches the @media (min-width: 860px) switch in messages.css),
+  // so opening a thread there should replace the list view, not just
+  // populate a pane the user can't currently see.
+  function isDesktopMsgLayout() { return window.matchMedia("(min-width: 860px)").matches; }
 
   var conversations = [];
   var activeOtherId = null;
@@ -34,6 +41,33 @@
   // process's own system timezone happens to be UTC (true on Vercel by
   // default, not guaranteed everywhere, and provably false on at least
   // one dev machine this project has been tested from).
+  // Turns any http(s):// or www. URL in a message into a real clickable
+  // link. Escapes everything else normally — the URL segment itself is
+  // escaped too before going into the href/label, so a message that
+  // happens to contain "http://evil<script>" can't break out of the
+  // anchor tag.
+  var URL_REGEX = /(https?:\/\/[^\s<]+)|(www\.[^\s<]+)/gi;
+  function linkifyHtml(text) {
+    var parts = [];
+    var lastIndex = 0;
+    var match;
+    URL_REGEX.lastIndex = 0;
+    while ((match = URL_REGEX.exec(text)) !== null) {
+      if (match.index > lastIndex) parts.push(H.escapeHtml(text.slice(lastIndex, match.index)));
+      var url = match[0];
+      var trail = "";
+      while (url.length && ")]}'\".,;:!?".indexOf(url[url.length - 1]) !== -1) {
+        trail = url[url.length - 1] + trail;
+        url = url.slice(0, -1);
+      }
+      var href = /^https?:\/\//i.test(url) ? url : "https://" + url;
+      parts.push('<a href="' + H.escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' + H.escapeHtml(url) + "</a>" + H.escapeHtml(trail));
+      lastIndex = match.index + match[0].length;
+    }
+    parts.push(H.escapeHtml(text.slice(lastIndex)));
+    return parts.join("");
+  }
+
   function fmtPresence(isOnline, secondsAgo) {
     if (isOnline) return "Active now";
     if (secondsAgo == null) return "";
@@ -103,8 +137,10 @@
 
   function openThread(otherId) {
     activeOtherId = otherId;
+    editingMessageId = null; // switching threads abandons any pending edit in the old one
     threadEmpty.hidden = true;
     threadActive.hidden = false;
+    msgShell.classList.add("show-thread");
     setTypingIndicator(false);
 
     var known = conversations.find(function (c) { return c.otherId === otherId; });
@@ -156,6 +192,12 @@
     H.api("typing", { method: "POST", body: { withId: activeOtherId } }).catch(function () {});
   }
 
+  // Which message (if any) the user currently has an open edit form on —
+  // the background poll must not touch the DOM while this is set, since
+  // a full re-render replaces bodyEl.innerHTML wholesale and would wipe
+  // out the <textarea> mid-edit.
+  var editingMessageId = null;
+
   var currentMessages = [];
   function renderMessages(messages) {
     currentMessages = messages;
@@ -172,7 +214,7 @@
             return (
               '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + '" data-msg-id="' + m.id + '">' +
               '<div class="msg-bubble-col">' +
-              '<div class="msg-bubble-wrap"><div class="msg-bubble">' + H.escapeHtml(m.content) + "</div>" + editBtn + "</div>" +
+              '<div class="msg-bubble-wrap"><div class="msg-bubble">' + linkifyHtml(m.content) + "</div>" + editBtn + "</div>" +
               '<div class="msg-bubble-time">' + edited + "<span>" + fmtTime(m.createdAt) + "</span>" + receipt + "</div></div></div>"
             );
           })
@@ -190,6 +232,7 @@
   function startEditingMessage(id) {
     var msg = currentMessages.find(function (m) { return m.id === id; });
     if (!msg) return;
+    editingMessageId = id;
     var row = bodyEl.querySelector('.msg-bubble-row[data-msg-id="' + id + '"]');
     var bubbleWrap = row.querySelector(".msg-bubble-wrap");
     bubbleWrap.innerHTML =
@@ -200,13 +243,17 @@
     var textarea = bubbleWrap.querySelector("textarea");
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-    bubbleWrap.querySelector(".msg-edit-cancel").addEventListener("click", function () { renderMessages(currentMessages); });
+    bubbleWrap.querySelector(".msg-edit-cancel").addEventListener("click", function () {
+      editingMessageId = null;
+      renderMessages(currentMessages);
+    });
     bubbleWrap.querySelector(".msg-edit-form").addEventListener("submit", function (e) {
       e.preventDefault();
       var content = textarea.value.trim();
       if (!content) return;
       H.api("messages", { method: "PUT", body: { id: id, content: content } })
         .then(function (d) {
+          editingMessageId = null;
           var idx = currentMessages.findIndex(function (m) { return m.id === id; });
           if (idx !== -1) currentMessages[idx] = d.message;
           renderMessages(currentMessages);
@@ -218,8 +265,20 @@
 
   function loadThread(scrollToBottom) {
     if (!activeOtherId) return;
+    // Any full re-render replaces bodyEl.innerHTML wholesale, which
+    // would wipe out an in-progress edit <textarea> — this has to hold
+    // for every trigger (background poll, the reload after sending a
+    // new message, opening the thread), not just polls: a send's own
+    // reload can just as easily land while the user is mid-edit on a
+    // different bubble. Still fetch (so `currentMessages` stays fresh
+    // for whenever the edit ends), just don't touch the DOM meanwhile.
+    // Checked again after the fetch resolves, not just before it
+    // starts, since an edit can begin while a request is already in
+    // flight.
+    if (editingMessageId !== null) return;
     H.api("messages", { query: { with: activeOtherId } })
       .then(function (data) {
+        if (editingMessageId !== null) { currentMessages = data.messages; return; }
         renderMessages(data.messages);
         if (scrollToBottom || isShowingTyping) bodyEl.scrollTop = bodyEl.scrollHeight;
         loadConversations(); // refresh unread counts/previews in the list
@@ -250,11 +309,18 @@
   inputEl.addEventListener("input", pingTyping);
 
   searchInput.addEventListener("input", function () { renderConvList(searchInput.value.trim()); });
+  // On mobile, going "back" just switches the pane back to the list —
+  // activeOtherId stays set so the thread's data (and its background
+  // polling) keeps up to date, and reopening it is instant.
+  backBtn.addEventListener("click", function () { msgShell.classList.remove("show-thread"); });
 
   loadConversations(function () {
     if (preselectId) {
       openThread(preselectId);
-    } else if (conversations.length) {
+    } else if (conversations.length && isDesktopMsgLayout()) {
+      // On mobile, landing on Messages should show the conversation list
+      // first (like every chat app) — auto-opening a thread there would
+      // immediately hide the list the user just navigated to.
       openThread(conversations[0].otherId);
     }
   });
