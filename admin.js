@@ -210,6 +210,38 @@
       });
   });
 
+  // ---------- Add one engineer manually ----------
+  var addForm = document.getElementById("ad-add-form");
+  var addError = document.getElementById("ad-add-error");
+  addForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    addError.hidden = true;
+    var nameInput = document.getElementById("ad-add-name");
+    var numberInput = document.getElementById("ad-add-number");
+    var name = nameInput.value.trim();
+    var iekNumber = numberInput.value.trim();
+    var submitBtn = addForm.querySelector("button[type=submit]");
+    var originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Adding…";
+    adminApi("admin-engineers", { method: "POST", body: { name: name, iekNumber: iekNumber } })
+      .then(function (d) {
+        toast(d.engineer.name + " added");
+        nameInput.value = "";
+        numberInput.value = "";
+        loadStats();
+        loadEngineers(true);
+      })
+      .catch(function (err) {
+        addError.textContent = err.message;
+        addError.hidden = false;
+      })
+      .finally(function () {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+      });
+  });
+
   loadStats();
   loadEngineers(true);
 })();

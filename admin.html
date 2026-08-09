@@ -67,6 +67,23 @@
       <button id="ad-import-btn" class="eh-btn eh-btn-primary hub-btn-sm" disabled>Import</button>
     </div>
     <div id="ad-import-result" class="ad-import-result" hidden></div>
+
+    <div class="ad-divider"></div>
+
+    <h2>Add one engineer</h2>
+    <p class="ad-card-sub">For onboarding someone one at a time instead of a whole file.</p>
+    <form id="ad-add-form" class="ad-add-form">
+      <label class="lg-field">
+        <span>Name</span>
+        <input type="text" id="ad-add-name" placeholder="e.g. Eng. Jane Wanjiru" required />
+      </label>
+      <label class="lg-field">
+        <span>Membership number</span>
+        <input type="text" id="ad-add-number" placeholder="e.g. M.1234" required />
+      </label>
+      <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Add engineer</button>
+    </form>
+    <div id="ad-add-error" class="lg-error" hidden></div>
   </section>
 
   <section class="ad-card">

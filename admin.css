@@ -35,6 +35,11 @@ body { background: var(--bg); }
 .ad-import-result .skip-row { font-size: 12px; color: var(--ink-muted); display: flex; gap: 8px; }
 .ad-import-result .skip-row .reason { color: var(--red-600); font-weight: 600; }
 
+.ad-divider { height: 1px; background: var(--border); margin: 22px 0; }
+.ad-add-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.ad-add-form .lg-field { flex: 1; min-width: 200px; margin: 0; }
+.ad-add-form button { flex-shrink: 0; }
+
 .ad-table-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
 .ad-table-head input {
   min-width: 260px; font-family: var(--font-body); font-size: 13.5px;

@@ -49,12 +49,22 @@
     pendingVideoUrl = null;
     imagePreview.hidden = true;
     imageInput.value = "";
+    cameraInput.value = "";
     videoPreview.hidden = true;
     videoInput.value = "";
   }
   textarea.addEventListener("input", function () { charCount.textContent = textarea.value.length + " / 3000"; });
-  imageInput.addEventListener("change", function () {
-    var file = imageInput.files[0];
+
+  // A single <input accept="image/*"> can't reliably offer both "take a
+  // new photo" and "choose an existing one" — capture="environment"
+  // launches the camera directly on most mobile browsers (iOS Safari in
+  // particular drops the photo-library option entirely once it's set),
+  // while leaving it off falls back to each OS/browser's own generic
+  // chooser, whose "Camera" shortcut is inconsistently reliable across
+  // Android OEM skins. Two separate inputs, one with capture and one
+  // without, sidesteps that instead of gambling on either alone — both
+  // funnel into the same pending-image handling.
+  function onImagePicked(file) {
     if (!file) return;
     pendingVideoFile = null;
     videoPreview.hidden = true;
@@ -63,11 +73,15 @@
     var reader = new FileReader();
     reader.onload = function (e) { imagePreviewImg.src = e.target.result; imagePreview.hidden = false; };
     reader.readAsDataURL(file);
-  });
+  }
+  var cameraInput = document.getElementById("composer-camera-input");
+  imageInput.addEventListener("change", function () { onImagePicked(imageInput.files[0]); });
+  cameraInput.addEventListener("change", function () { onImagePicked(cameraInput.files[0]); });
   document.getElementById("composer-image-remove").addEventListener("click", function () {
     pendingImageFile = null;
     imagePreview.hidden = true;
     imageInput.value = "";
+    cameraInput.value = "";
   });
   videoInput.addEventListener("change", function () {
     var file = videoInput.files[0];
@@ -75,6 +89,7 @@
     pendingImageFile = null;
     imagePreview.hidden = true;
     imageInput.value = "";
+    cameraInput.value = "";
     pendingVideoFile = file;
     videoPreviewName.textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(1) + " MB)";
     videoPreview.hidden = false;

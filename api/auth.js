@@ -1415,6 +1415,26 @@ export default async function handler(req, res) {
         });
       }
 
+      if (req.method === "POST") {
+        const b = req.body || {};
+        const name = String(b.name || "").trim();
+        const iekNumber = String(b.iekNumber || "").trim();
+        if (!name || !iekNumber) {
+          return res.status(400).json({ error: "Name and membership number are required." });
+        }
+        const digits = digitsOnly(iekNumber);
+        if (!digits) return res.status(400).json({ error: "Membership number must contain digits." });
+        const [collision] = await sql`SELECT id FROM engineers WHERE regexp_replace(iek_number, '[^0-9]', '', 'g') = ${digits}`;
+        if (collision) return res.status(409).json({ error: "An engineer with that membership number already exists." });
+        const [created] = await sql`
+          INSERT INTO engineers (iek_number, name) VALUES (${iekNumber}, ${name})
+          RETURNING id, iek_number, name, display_name
+        `;
+        return res.status(201).json({
+          engineer: { id: created.id, iekNumber: created.iek_number, name: created.name, displayName: created.display_name || created.name },
+        });
+      }
+
       if (req.method === "PUT") {
         const b = req.body || {};
         const id = Number(b.id);
@@ -1439,7 +1459,7 @@ export default async function handler(req, res) {
         });
       }
 
-      res.setHeader("Allow", "GET, PUT, OPTIONS");
+      res.setHeader("Allow", "GET, POST, PUT, OPTIONS");
       return res.status(405).json({ error: "Method not allowed." });
     }
 
