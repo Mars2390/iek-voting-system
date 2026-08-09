@@ -36,6 +36,12 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+/* Safety net: nothing on this site is meant to be wider than the
+   viewport. If a future absolutely-positioned dropdown/panel ever
+   miscalculates and overflows off an edge again, this keeps that one
+   element clipped instead of letting the whole page scroll sideways
+   (exactly what happened with the nav search panel on phones). */
+html, body { overflow-x: hidden; }
 body {
   margin: 0;
   background: var(--bg);
