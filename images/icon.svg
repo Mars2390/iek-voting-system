@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Engineer Hub icon">
+  <defs>
+    <linearGradient id="icon-logo-grad" x1="4" y1="28" x2="28" y2="4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#bb0a1e" />
+      <stop offset="1" stop-color="#007a3d" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="#ffffff" />
+  <g transform="translate(99.55, 99.55) scale(9.777)">
+    <line x1="8" y1="24" x2="24" y2="8" stroke="url(#icon-logo-grad)" stroke-width="2" stroke-linecap="round" />
+    <line x1="8" y1="24" x2="24" y2="24" stroke="url(#icon-logo-grad)" stroke-width="2" stroke-linecap="round" />
+    <line x1="24" y1="8" x2="24" y2="24" stroke="url(#icon-logo-grad)" stroke-width="2" stroke-linecap="round" />
+    <circle cx="8" cy="24" r="4" fill="#101a24" />
+    <circle cx="24" cy="8" r="4" fill="url(#icon-logo-grad)" />
+    <circle cx="24" cy="24" r="4" fill="url(#icon-logo-grad)" />
+  </g>
+</svg>
