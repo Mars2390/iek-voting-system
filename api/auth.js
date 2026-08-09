@@ -11,7 +11,8 @@ import { applyCors, sendError } from "./_utils.js";
 //
 // Actions: login, logout, me, update-profile, upload-photo,
 // work-experience, education, skills, directory, connections, feed,
-// jobs, profile, dashboard, toggle-open-to-work, conversations, messages.
+// jobs, profile, dashboard, toggle-open-to-work, conversations, messages,
+// admin-login, admin-logout, admin-me, admin-engineers, admin-import.
 //
 // KNOWN GAP, documented rather than hidden (same convention as the
 // voting system's own README "Security note" and the original login
@@ -32,6 +33,15 @@ const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
 const MAX_VIDEO_BYTES = 40 * 1024 * 1024; // 40MB
 const REACTION_TYPES = ["like", "love", "celebrate", "laugh", "wow", "sad", "angry"];
 const TYPING_WINDOW_MS = 8000;
+
+// Admin panel access — intentionally a short allowlist + shared PIN, not
+// tied to the engineers table at all (an admin need not be one of the
+// 317 registered engineers). Same "documented, not hidden" convention
+// as the membership-number login above: this is deliberately minimal,
+// by request, not an oversight.
+const ADMIN_EMAILS = ["albertmomanyi07@gmail.com", "starikonyamori@gmail.com"];
+const ADMIN_PIN = "0000";
+const ADMIN_SESSION_DAYS = 7;
 
 // Vercel's (req, res)-style Node functions only auto-parse req.body for
 // application/json, application/x-www-form-urlencoded, and text/plain —
@@ -72,6 +82,22 @@ async function requireSession(sql, req, res) {
   }
   sql`UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ${session.session_id}`.catch(() => {});
   sql`UPDATE engineers SET last_active = CURRENT_TIMESTAMP WHERE id = ${session.id}`.catch(() => {});
+  return session;
+}
+
+async function requireAdminSession(sql, req, res) {
+  const token = getToken(req);
+  if (!token) {
+    res.status(401).json({ error: "Not signed in." });
+    return null;
+  }
+  const [session] = await sql`
+    SELECT id, email, (expires_at < NOW()) AS is_expired FROM admin_sessions WHERE token = ${token}
+  `;
+  if (!session || session.is_expired) {
+    res.status(401).json({ error: "Your admin session has expired. Please log in again." });
+    return null;
+  }
   return session;
 }
 
@@ -1311,8 +1337,189 @@ export default async function handler(req, res) {
       });
     }
 
+    // =========================================================
+    // ADMIN PANEL — engineer onboarding/roster management. Entirely
+    // separate auth (admin_sessions + email/PIN allowlist), not tied to
+    // the engineers table, not linked from anywhere a regular member
+    // would see (admin-login.html isn't referenced in the public nav).
+    // =========================================================
+    if (action === "admin-login") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const { email, pin } = req.body || {};
+      const normEmail = String(email || "").trim().toLowerCase();
+      if (!ADMIN_EMAILS.includes(normEmail) || String(pin || "") !== ADMIN_PIN) {
+        return res.status(401).json({ error: "Invalid email or PIN." });
+      }
+      const token = randomBytes(32).toString("hex");
+      await sql`INSERT INTO admin_sessions (token, email, expires_at) VALUES (${token}, ${normEmail}, NOW() + (${ADMIN_SESSION_DAYS}::int * INTERVAL '1 day'))`;
+      return res.status(200).json({ token, email: normEmail });
+    }
+
+    if (action === "admin-logout") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const token = getToken(req);
+      if (token) await sql`DELETE FROM admin_sessions WHERE token = ${token}`;
+      return res.status(200).json({ success: true });
+    }
+
+    if (action === "admin-me") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      return res.status(200).json({ email: admin.email });
+    }
+
+    if (action === "admin-engineers") {
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+
+      if (req.method === "GET") {
+        const q = String(req.query.q || "").trim();
+        const limit = Math.min(Number(req.query.limit) || 50, 200);
+        const offset = Math.max(Number(req.query.offset) || 0, 0);
+        const like = `%${q}%`;
+        const [rows, totalRow, activeRow] = await Promise.all([
+          sql`
+            SELECT id, iek_number, name, display_name, last_login, last_active, created_at,
+                   (last_active > NOW() - INTERVAL '5 minutes') AS is_active_now
+            FROM engineers
+            WHERE (${q}::text = '' OR name ILIKE ${like} OR display_name ILIKE ${like} OR iek_number ILIKE ${like})
+            ORDER BY last_active DESC NULLS LAST, id DESC
+            LIMIT ${limit} OFFSET ${offset}
+          `,
+          sql`SELECT COUNT(*) FROM engineers`,
+          sql`SELECT COUNT(*) FROM engineers WHERE last_active > NOW() - INTERVAL '5 minutes'`,
+        ]);
+        return res.status(200).json({
+          engineers: rows.map((e) => ({
+            id: e.id,
+            iekNumber: e.iek_number,
+            name: e.name,
+            displayName: e.display_name || e.name,
+            lastLogin: e.last_login,
+            lastActive: e.last_active,
+            createdAt: e.created_at,
+            isActiveNow: e.is_active_now,
+          })),
+          total: Number(totalRow[0].count),
+          activeNow: Number(activeRow[0].count),
+        });
+      }
+
+      if (req.method === "PUT") {
+        const b = req.body || {};
+        const id = Number(b.id);
+        const name = String(b.name || "").trim();
+        const iekNumber = String(b.iekNumber || "").trim();
+        if (!id || !name || !iekNumber) {
+          return res.status(400).json({ error: "Name and membership number are required." });
+        }
+        const digits = digitsOnly(iekNumber);
+        if (!digits) return res.status(400).json({ error: "Membership number must contain digits." });
+        const [collision] = await sql`
+          SELECT id FROM engineers WHERE regexp_replace(iek_number, '[^0-9]', '', 'g') = ${digits} AND id != ${id}
+        `;
+        if (collision) return res.status(409).json({ error: "Another engineer already has that membership number." });
+        const [updated] = await sql`
+          UPDATE engineers SET name = ${name}, iek_number = ${iekNumber} WHERE id = ${id}
+          RETURNING id, iek_number, name, display_name
+        `;
+        if (!updated) return res.status(404).json({ error: "Engineer not found." });
+        return res.status(200).json({
+          engineer: { id: updated.id, iekNumber: updated.iek_number, name: updated.name, displayName: updated.display_name || updated.name },
+        });
+      }
+
+      res.setHeader("Allow", "GET, PUT, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    if (action === "admin-import") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+
+      const body = await readRawBody(req);
+      if (!body.length) return res.status(400).json({ error: "No file data received." });
+
+      let sheetRows;
+      try {
+        const XLSX = await import("xlsx");
+        const wb = XLSX.read(body, { type: "buffer" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        sheetRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      } catch {
+        return res.status(400).json({ error: "Couldn't read that file. Make sure it's a valid CSV or Excel (.xlsx) file." });
+      }
+      if (!sheetRows.length) return res.status(400).json({ error: "That file doesn't have any rows." });
+
+      // Header names vary a lot in the wild ("Name" / "Full Name" / "Member
+      // Name", "Membership No" / "IEK Number" / "No") — match loosely
+      // instead of demanding one exact template.
+      const NAME_PATTERNS = [/^name$/i, /full.?name/i, /member.*name/i, /^name/i];
+      const NUMBER_PATTERNS = [/member.*(no|num|number)/i, /iek.*(no|num|number)/i, /membership/i, /^(no|num|number)$/i];
+      function findKey(row, patterns) {
+        const keys = Object.keys(row);
+        for (const p of patterns) {
+          const hit = keys.find((k) => p.test(k));
+          if (hit) return hit;
+        }
+        return null;
+      }
+
+      const nameKey = findKey(sheetRows[0], NAME_PATTERNS);
+      const numberKey = findKey(sheetRows[0], NUMBER_PATTERNS);
+      if (!nameKey || !numberKey) {
+        return res.status(400).json({ error: "Couldn't find a name column and a membership number column — check the file's headers." });
+      }
+
+      const existingRows = await sql`SELECT regexp_replace(iek_number, '[^0-9]', '', 'g') AS digits FROM engineers`;
+      const existingDigits = new Set(existingRows.map((r) => r.digits));
+
+      const toInsert = [];
+      const skipped = [];
+      const seenThisFile = new Set();
+      sheetRows.forEach((row, i) => {
+        const rawName = String(row[nameKey] ?? "").trim();
+        const rawNumber = String(row[numberKey] ?? "").trim();
+        const digits = digitsOnly(rawNumber);
+        const rowNum = i + 2; // header is row 1
+        if (!rawName || !digits) {
+          skipped.push({ row: rowNum, name: rawName, iekNumber: rawNumber, reason: !rawName ? "Missing name" : "Missing/invalid membership number" });
+        } else if (seenThisFile.has(digits)) {
+          skipped.push({ row: rowNum, name: rawName, iekNumber: rawNumber, reason: "Duplicate membership number within this file" });
+        } else if (existingDigits.has(digits)) {
+          skipped.push({ row: rowNum, name: rawName, iekNumber: rawNumber, reason: "Membership number already exists" });
+        } else {
+          seenThisFile.add(digits);
+          toInsert.push({ name: rawName, iekNumber: rawNumber });
+        }
+      });
+
+      await Promise.all(toInsert.map((r) => sql`INSERT INTO engineers (iek_number, name) VALUES (${r.iekNumber}, ${r.name})`));
+
+      return res.status(200).json({
+        importedCount: toInsert.length,
+        skippedCount: skipped.length,
+        imported: toInsert,
+        skipped,
+      });
+    }
+
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import.",
     });
   } catch (err) {
     return sendError(res, err);

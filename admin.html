@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Admin — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+
+<header class="ad-nav">
+  <div class="ad-nav-row">
+    <span class="eh-brand">
+      <span class="eh-brand-mark">
+        <svg viewBox="0 0 32 32" width="20" height="20" role="img" aria-label="Engineer Hub logo">
+          <defs>
+            <linearGradient id="logo-grad" x1="4" y1="28" x2="28" y2="4" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#bb0a1e" />
+              <stop offset="1" stop-color="#007a3d" />
+            </linearGradient>
+          </defs>
+          <line x1="8" y1="24" x2="24" y2="8" stroke="url(#logo-grad)" stroke-width="2" />
+          <line x1="8" y1="24" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+          <line x1="24" y1="8" x2="24" y2="24" stroke="url(#logo-grad)" stroke-width="2" />
+          <circle cx="8" cy="24" r="4" fill="#101a24" />
+          <circle cx="24" cy="8" r="4" fill="url(#logo-grad)" />
+          <circle cx="24" cy="24" r="4" fill="url(#logo-grad)" />
+        </svg>
+      </span>
+      <span class="eh-brand-text"><span class="name">Engineer<em>Hub</em></span></span>
+    </span>
+    <span class="ad-nav-tag">Admin</span>
+    <div class="ad-nav-actions">
+      <span id="ad-email" class="ad-nav-email"></span>
+      <button id="ad-logout" type="button" class="eh-btn eh-btn-ghost-dark ad-logout-btn">Log out</button>
+    </div>
+  </div>
+</header>
+
+<main class="ad-main">
+  <div class="ad-stats-row">
+    <div class="ad-stat-card">
+      <div class="num" id="ad-stat-total">—</div>
+      <div class="label">Total engineers</div>
+    </div>
+    <div class="ad-stat-card">
+      <div class="num" id="ad-stat-active">—</div>
+      <div class="label">Active right now</div>
+    </div>
+  </div>
+
+  <section class="ad-card">
+    <h2>Onboard engineers</h2>
+    <p class="ad-card-sub">Upload a CSV or Excel file with a name column and a membership-number column. Existing membership numbers are skipped automatically.</p>
+    <div class="ad-import-row">
+      <label class="ad-file-btn">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M12 4l-4 4M12 4l4 4" /><path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3" /></svg>
+        <span id="ad-file-label">Choose CSV or Excel file…</span>
+        <input type="file" id="ad-import-input" accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+      </label>
+      <button id="ad-import-btn" class="eh-btn eh-btn-primary hub-btn-sm" disabled>Import</button>
+    </div>
+    <div id="ad-import-result" class="ad-import-result" hidden></div>
+  </section>
+
+  <section class="ad-card">
+    <div class="ad-table-head">
+      <h2>All engineers</h2>
+      <input type="text" id="ad-search" placeholder="Search by name or membership number…" />
+    </div>
+    <div class="ad-table-wrap">
+      <table class="ad-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Membership No.</th>
+            <th>Status</th>
+            <th>Last active</th>
+            <th>Last login</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ad-table-body"></tbody>
+      </table>
+    </div>
+    <div style="text-align:center;margin-top:16px;">
+      <button id="ad-loadmore" class="eh-btn eh-btn-ghost-light hub-btn-sm" hidden>Load more</button>
+    </div>
+  </section>
+</main>
+
+<div id="ad-edit-overlay" class="hub-modal-overlay" hidden>
+  <div class="hub-modal">
+    <div class="hub-modal-head"><h3>Edit engineer</h3><button type="button" id="ad-edit-close" class="hub-modal-close">&times;</button></div>
+    <form id="ad-edit-form" class="ad-edit-form">
+      <input type="hidden" id="ad-edit-id" />
+      <label class="lg-field">
+        <span>Name</span>
+        <input type="text" id="ad-edit-name" required />
+      </label>
+      <label class="lg-field">
+        <span>Membership number</span>
+        <input type="text" id="ad-edit-number" required />
+      </label>
+      <div id="ad-edit-error" class="lg-error" hidden></div>
+      <div class="ad-edit-actions">
+        <button type="button" id="ad-edit-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm">Cancel</button>
+        <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="admin.js"></script>
+</body>
+</html>

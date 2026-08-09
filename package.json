@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
-    "@vercel/blob": "^2.7.0"
+    "@vercel/blob": "^2.7.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "keywords": [
     "iek",
