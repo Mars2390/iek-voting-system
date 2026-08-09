@@ -48,7 +48,7 @@
           <h1 id="pf-name">—</h1>
           <p id="pf-title" class="pf-title"></p>
           <p class="pf-meta">
-            <span class="hub-verified-badge">Verified — <span id="pf-iek"></span></span>
+            <span class="hub-verified-badge">Verified<span id="pf-iek-wrap" hidden> — <span id="pf-iek"></span></span></span>
             <span id="pf-location-company"></span>
             <a href="#" id="pf-connections-count" class="pf-connections-link"></a>
             <a href="#" id="pf-followers-count" class="pf-connections-link"></a>
@@ -185,7 +185,30 @@
         <form id="pf-details-form" hidden>
           <label class="lg-field"><span>Full name</span><input type="text" id="pf-input-name" /></label>
           <label class="lg-field"><span>Title</span><input type="text" id="pf-input-title" placeholder="e.g. Civil Engineer" /></label>
-          <label class="lg-field"><span>Discipline</span><input type="text" id="pf-input-discipline" /></label>
+          <label class="lg-field">
+            <span>Discipline</span>
+            <select id="pf-input-discipline">
+              <option value="">Select a discipline…</option>
+              <option>Civil Engineering</option>
+              <option>Structural Engineering</option>
+              <option>Electrical Engineering</option>
+              <option>Mechanical Engineering</option>
+              <option>Chemical Engineering</option>
+              <option>Environmental Engineering</option>
+              <option>Water Engineering</option>
+              <option>Geotechnical Engineering</option>
+              <option>Mining Engineering</option>
+              <option>Agricultural & Biosystems Engineering</option>
+              <option>Industrial & Textile Engineering</option>
+              <option>Marine Engineering</option>
+              <option>Aeronautical Engineering</option>
+              <option>Petroleum Engineering</option>
+              <option>Biomedical Engineering</option>
+              <option>Computer / Software Engineering</option>
+              <option>Telecommunication Engineering</option>
+              <option>Other</option>
+            </select>
+          </label>
           <label class="lg-field"><span>Company</span><input type="text" id="pf-input-company" /></label>
           <label class="lg-field"><span>Location</span><input type="text" id="pf-input-location" /></label>
           <label class="lg-field"><span>Years of experience</span><input type="number" id="pf-input-years" min="0" max="70" /></label>

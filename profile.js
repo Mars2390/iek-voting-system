@@ -61,7 +61,12 @@
 
     document.getElementById("pf-name").textContent = e.displayName;
     document.getElementById("pf-title").textContent = e.title || (state.isSelf ? "Add your title" : "");
-    document.getElementById("pf-iek").textContent = e.iekNumber;
+    // The membership number is also the login username (see api/auth.js
+    // `login`), so it's only ever sent to the profile's own owner — the
+    // API omits it entirely for anyone else, and the badge here follows
+    // suit rather than printing "undefined".
+    document.getElementById("pf-iek-wrap").hidden = !state.isSelf;
+    if (state.isSelf) document.getElementById("pf-iek").textContent = e.iekNumber;
     var locCompany = [e.location, e.company].filter(Boolean).join(" · ");
     document.getElementById("pf-location-company").textContent = locCompany;
 
@@ -531,11 +536,17 @@
   function renderDetails() {
     var e = state.engineer;
     document.getElementById("pf-details-edit-btn").hidden = !state.isSelf;
+    // A manually-typed experience number is easy to leave blank/zero even
+    // after adding real job history in the Experience section below — so
+    // an empty/zero manual value falls back to a figure computed from
+    // that history instead of just printing "0 yrs".
+    var years = e.experienceYears || state.experienceYearsFromHistory;
+    var yearsLabel = years != null ? years + " yrs" + (!e.experienceYears && state.experienceYearsFromHistory ? " (from work history)" : "") : "—";
     var rows = [
       ["Discipline", e.discipline || "—"],
       ["Company", e.company || "—"],
       ["Location", e.location || "—"],
-      ["Experience", e.experienceYears != null ? e.experienceYears + " yrs" : "—"],
+      ["Experience", yearsLabel],
     ];
     document.getElementById("pf-details-view").innerHTML = rows.map(function (r) { return '<div class="row"><dt>' + r[0] + "</dt><dd>" + H.escapeHtml(r[1]) + "</dd></div>"; }).join("");
   }

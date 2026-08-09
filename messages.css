@@ -1,7 +1,15 @@
 .msg-shell {
   display: grid;
   grid-template-columns: 1fr;
+  /* dvh tracks the *actual* visible viewport, shrinking when mobile
+     browser chrome (URL bar, etc.) is showing — vh is the address-bar
+     height whether or not the bar is currently on screen, which is
+     exactly what made this cut off on phones. The vh line stays first
+     as a fallback: browsers that don't know the dvh unit discard that
+     whole declaration as invalid and keep this one instead of collapsing
+     to 0. */
   height: calc(100vh - 64px);
+  height: calc(100dvh - 64px);
   max-width: 1180px;
   margin: 0 auto;
   border-left: 1px solid var(--border);
@@ -140,7 +148,10 @@
    button clears it. The height also has to subtract the fixed bottom
    tab bar's own height here, or the send-form ends up hidden under it. */
 @media (max-width: 859px) {
-  .msg-shell { height: calc(100vh - 64px - 62px); }
+  .msg-shell {
+    height: calc(100vh - 64px - 62px);
+    height: calc(100dvh - 64px - 62px);
+  }
   .msg-thread { display: none; }
   .msg-shell.show-thread .msg-inbox { display: none; }
   .msg-shell.show-thread .msg-thread { display: flex; }

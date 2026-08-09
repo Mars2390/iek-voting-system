@@ -72,7 +72,7 @@ window.HubPosts = (function () {
     var menu = '<div class="feed-post-menu" data-menu><button type="button" data-menu-toggle>&#8942;</button><div class="feed-post-menu-list">' + menuItems.join("") + "</div></div>";
 
     var repostHtml = p.repostOf
-      ? '<div class="feed-repost-box"><div class="head">' + H.avatarHtml(p.repostOf, "sm") + '<h5>' + H.escapeHtml(p.repostOf.authorName) + '</h5></div>' +
+      ? '<div class="feed-repost-box"><div class="head">' + H.avatarHtml({ displayName: p.repostOf.authorName, profilePhoto: p.repostOf.authorPhoto }, "sm") + '<h5>' + H.escapeHtml(p.repostOf.authorName) + '</h5></div>' +
         (p.repostOf.content ? '<p>' + H.escapeHtml(p.repostOf.content) + '</p>' : "") +
         mediaHtml(p.repostOf.imageUrl, p.repostOf.videoUrl, p.repostOf.imageUrls) +
         "</div>"

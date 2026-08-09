@@ -28,12 +28,17 @@
   function jobCard(j, mine) {
     var meta = [j.companyName, j.location, j.jobType, j.discipline].filter(Boolean).join(" · ");
     var salary = fmtSalary(j);
+    // "mine" is which tab/panel this card is rendering in, not whether
+    // the viewer owns THIS job — the Browse tab lists everyone's jobs
+    // including your own, so Apply has to be hidden by actual ownership
+    // (postedById), not just by which panel is showing.
+    var isOwner = mine || j.postedById === myId;
     var applyHtml = j.applyUrl
       ? '<a href="' + H.escapeHtml(j.applyUrl) + '" target="_blank" rel="noopener" class="eh-btn eh-btn-primary hub-btn-sm">Apply</a>'
       : j.applyEmail
       ? '<a href="mailto:' + H.escapeHtml(j.applyEmail) + '" class="eh-btn eh-btn-primary hub-btn-sm">Apply</a>'
       : "";
-    var deleteHtml = mine || j.postedById === myId ? '<button class="eh-btn eh-btn-ghost-light hub-btn-sm" data-remove="' + j.id + '">Remove</button>' : "";
+    var deleteHtml = isOwner ? '<button class="eh-btn eh-btn-ghost-light hub-btn-sm" data-remove="' + j.id + '">Remove</button>' : "";
     return (
       '<div class="hub-card hub-job-card">' +
       "<h3>" + H.escapeHtml(j.title) + "</h3>" +
@@ -41,7 +46,7 @@
       '<p class="desc">' + H.escapeHtml(j.description) + "</p>" +
       '<div class="foot">' +
       '<span class="posted-by">Posted by ' + H.escapeHtml(j.postedBy) + " · " + H.timeAgo(j.createdAt) + "</span>" +
-      '<div style="display:flex;gap:8px;">' + (mine ? "" : applyHtml) + deleteHtml + "</div>" +
+      '<div style="display:flex;gap:8px;">' + (isOwner ? "" : applyHtml) + deleteHtml + "</div>" +
       "</div></div>"
     );
   }

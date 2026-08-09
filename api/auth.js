@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getSql } from "./_db.js";
 import { applyCors, sendError } from "./_utils.js";
@@ -14,12 +14,11 @@ import { applyCors, sendError } from "./_utils.js";
 // feed, jobs, profile, dashboard, toggle-open-to-work, conversations,
 // messages, admin-login, admin-logout, admin-me, admin-engineers, admin-import.
 //
-// KNOWN GAP, documented rather than hidden (same convention as the
-// voting system's own README "Security note" and the original login
-// comment below): a membership number is not a secret — anyone who can
-// guess or enumerate one gets full view+edit access to that person's
-// profile. Session tokens are long random values; the weak point is
-// specifically the login step, not what happens after it.
+// A membership number is not a secret — it's a lookup key, not a
+// credential — so login also requires a PIN the member sets on their
+// own first login (see the `login` action below). The number itself is
+// still never shown to anyone but its owner (see publicEngineer),
+// since it doubles as the login username.
 
 const SESSION_DAYS = 30;
 // Client compresses images before upload (hub-common.js compressImage),
@@ -60,6 +59,29 @@ async function readRawBody(req) {
 
 function digitsOnly(value) {
   return String(value || "").replace(/[^0-9]/g, "");
+}
+
+// scrypt is built into node:crypto — no extra dependency needed for
+// real password-grade hashing. Salt travels alongside the hash in the
+// same stored string ("salt:hash", both hex) since scrypt needs the
+// exact salt back to re-derive and compare.
+function hashPin(pin) {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(pin, salt, 64).toString("hex");
+  return salt + ":" + hash;
+}
+function verifyPin(pin, stored) {
+  if (!stored) return false;
+  const [salt, hash] = stored.split(":");
+  if (!salt || !hash) return false;
+  const candidate = scryptSync(pin, salt, 64).toString("hex");
+  const a = Buffer.from(candidate, "hex");
+  const b = Buffer.from(hash, "hex");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+function isValidPin(pin) {
+  return /^[0-9]{4,6}$/.test(String(pin || ""));
 }
 
 function getToken(req) {
@@ -132,13 +154,16 @@ function privateEngineer(e) {
   };
 }
 
-// Public-facing view of someone else's profile: no phone number.
-// Email/LinkedIn/GitHub/portfolio ARE shown — those are fields the
-// person explicitly filled in to be found professionally; phone comes
-// from the IEK voter register and was never meant for public display.
+// Public-facing view of someone else's profile: no phone number, and
+// no membership number — phone comes from the IEK voter register and
+// was never meant for public display, and the membership number
+// doubles as the login username (see the `login` action), so showing
+// it to other members would hand out the one thing needed to attempt
+// logging in as that person.
 function publicEngineer(e) {
   const priv = privateEngineer(e);
   delete priv.phone;
+  delete priv.iekNumber;
   return priv;
 }
 
@@ -213,20 +238,72 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: "Method not allowed." });
       }
 
-      const { displayName, membershipNumber } = req.body || {};
+      const { displayName, membershipNumber, pin } = req.body || {};
       const digits = digitsOnly(membershipNumber);
       if (!digits) {
         return res.status(400).json({ error: "Enter your membership number." });
       }
 
+      // is_pin_locked/pin_lock_minutes_left are computed in SQL, not from
+      // parsing pin_locked_until client-side — pin_locked_until is a
+      // naive TIMESTAMP (no timezone), and a naive value's wall-clock
+      // reading only means what it's supposed to if the reading
+      // process's own system timezone happens to be UTC, which isn't
+      // guaranteed (see the identical footgun already documented for
+      // `last_active` elsewhere in this file).
       const [engineer] = await sql`
-        SELECT * FROM engineers
+        SELECT *,
+               (pin_locked_until IS NOT NULL AND pin_locked_until > NOW()) AS is_pin_locked,
+               GREATEST(1, CEIL(EXTRACT(EPOCH FROM (pin_locked_until - NOW())) / 60))::int AS pin_lock_minutes_left
+        FROM engineers
         WHERE regexp_replace(iek_number, '[^0-9]', '', 'g') = ${digits}
       `;
       if (!engineer) {
         return res.status(404).json({
           error: "We couldn't find that membership number. Check the digits and try again.",
         });
+      }
+
+      if (engineer.is_pin_locked) {
+        const minutesLeft = engineer.pin_lock_minutes_left;
+        return res.status(429).json({
+          error: `Too many incorrect PIN attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}.`,
+        });
+      }
+
+      if (!engineer.pin_hash) {
+        // No PIN on this account yet — the member's own next login is
+        // what sets one (see migrations/009_pin_auth.sql), since there's
+        // no verified phone/email channel to issue one through instead.
+        if (!pin) {
+          return res.status(200).json({ needsPinSetup: true, name: engineer.display_name || engineer.name });
+        }
+        if (!isValidPin(pin)) {
+          return res.status(400).json({ error: "PIN must be 4-6 digits." });
+        }
+        await sql`
+          UPDATE engineers SET pin_hash = ${hashPin(pin)}, pin_set_at = CURRENT_TIMESTAMP, failed_pin_attempts = 0
+          WHERE id = ${engineer.id}
+        `;
+      } else {
+        if (!pin) {
+          return res.status(200).json({ needsPin: true, name: engineer.display_name || engineer.name });
+        }
+        if (!verifyPin(pin, engineer.pin_hash)) {
+          const attempts = (engineer.failed_pin_attempts || 0) + 1;
+          if (attempts >= 5) {
+            await sql`
+              UPDATE engineers SET failed_pin_attempts = 0, pin_locked_until = NOW() + INTERVAL '15 minutes'
+              WHERE id = ${engineer.id}
+            `;
+            return res.status(429).json({ error: "Too many incorrect PIN attempts. Try again in 15 minutes." });
+          }
+          await sql`UPDATE engineers SET failed_pin_attempts = ${attempts} WHERE id = ${engineer.id}`;
+          return res.status(401).json({ error: `Incorrect PIN. ${5 - attempts} attempt${5 - attempts === 1 ? "" : "s"} remaining.` });
+        }
+        if (engineer.failed_pin_attempts) {
+          await sql`UPDATE engineers SET failed_pin_attempts = 0 WHERE id = ${engineer.id}`;
+        }
       }
 
       const cleanName = String(displayName || "").trim().slice(0, 150);
@@ -536,7 +613,8 @@ export default async function handler(req, res) {
       return res.status(200).json({
         engineers: rows.map((e) => ({
           id: e.id,
-          iekNumber: e.iek_number,
+          // No iekNumber here — it's the login username (see the `login`
+          // action's PIN check), so the directory must never hand it out.
           displayName: e.display_name || e.name,
           discipline: e.discipline,
           company: e.company,
@@ -1061,6 +1139,22 @@ export default async function handler(req, res) {
       const conn = connectionRow[0];
       const presence = presenceRow[0] || {};
 
+      // The "Experience" detail field is a manually-typed number that's
+      // easy to leave at 0/blank even after adding real job history —
+      // this gives the frontend a computed-from-history number to fall
+      // back to instead of trusting a stale/unset manual figure.
+      const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000;
+      const experienceYearsFromHistory = experience.length
+        ? Math.round(
+            experience.reduce((sum, x) => {
+              if (!x.start_date) return sum;
+              const start = new Date(x.start_date);
+              const end = x.is_current || !x.end_date ? new Date() : new Date(x.end_date);
+              return sum + Math.max(0, (end - start) / MS_PER_YEAR);
+            }, 0)
+          )
+        : null;
+
       return res.status(200).json({
         engineer: isSelf ? privateEngineer(target) : publicEngineer(target),
         isSelf,
@@ -1085,6 +1179,7 @@ export default async function handler(req, res) {
         experience,
         education,
         skills,
+        experienceYearsFromHistory,
       });
     }
 
