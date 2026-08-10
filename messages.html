@@ -26,6 +26,11 @@
     <div class="msg-inbox-head">
       <h1>Messages</h1>
       <input type="text" id="msg-search" placeholder="Search conversations…" />
+      <div class="msg-filter-pills">
+        <button type="button" class="msg-filter-pill is-active" data-filter="all">All</button>
+        <button type="button" class="msg-filter-pill" data-filter="unread">Unread</button>
+        <button type="button" class="msg-filter-pill" data-filter="starred">Starred</button>
+      </div>
     </div>
     <div id="msg-conv-list" class="msg-conv-list">
       <div class="hub-loading">Loading…</div>

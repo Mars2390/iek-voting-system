@@ -34,6 +34,21 @@
     if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   }
+  // "Today" / "Yesterday" / "Monday, August 4" (this week) / full date
+  // with year once it's not this year — a day divider only needs enough
+  // precision to tell threads apart, never a full timestamp.
+  function fmtDayDivider(dateStr) {
+    var d = new Date(dateStr);
+    var now = new Date();
+    var startOfDay = function (dt) { return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()); };
+    var diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays > 1 && diffDays < 7) return d.toLocaleDateString("en-US", { weekday: "long" });
+    var opts = { weekday: "long", month: "long", day: "numeric" };
+    if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+    return d.toLocaleDateString("en-US", opts);
+  }
   // Presence text is built entirely from a server-computed "seconds ago"
   // integer, never from parsing a raw timestamp into a client-side Date —
   // the `engineers.last_active` column has no timezone, so a naive
@@ -76,31 +91,55 @@
     return "Active " + Math.floor(secondsAgo / 86400) + "d ago";
   }
 
+  var activeFilter = "all"; // "all" | "unread" | "starred"
   function renderConvList(filterText) {
     var filtered = conversations.filter(function (c) {
-      return !filterText || c.displayName.toLowerCase().indexOf(filterText.toLowerCase()) !== -1;
+      var matchesText = !filterText || c.displayName.toLowerCase().indexOf(filterText.toLowerCase()) !== -1;
+      var matchesFilter = activeFilter === "all" || (activeFilter === "unread" && c.unreadCount > 0) || (activeFilter === "starred" && c.isStarred);
+      return matchesText && matchesFilter;
     });
     if (!filtered.length) {
-      listEl.innerHTML = '<div class="hub-empty" style="padding:24px 16px;">No conversations yet. Message someone from their profile.</div>';
+      var emptyMsg =
+        activeFilter === "unread" ? "No unread conversations." :
+        activeFilter === "starred" ? "No starred conversations yet — star one to pin it here." :
+        "No conversations yet. Message someone from their profile.";
+      listEl.innerHTML = '<div class="hub-empty" style="padding:24px 16px;">' + emptyMsg + "</div>";
       return;
     }
     listEl.innerHTML = filtered
       .map(function (c) {
         var preview = c.lastMessage ? (c.lastMessageIsMine ? "You: " : "") + c.lastMessage : "Say hello — no messages yet.";
+        var presenceDot = c.isOnline ? '<span class="msg-presence-dot" aria-hidden="true"></span>' : "";
         return (
           '<div class="msg-conv-item' + (c.otherId === activeOtherId ? " is-active" : "") + '" data-id="' + c.otherId + '">' +
-          H.avatarHtml(c, "md") +
+          '<span class="msg-conv-avatar-wrap">' + H.avatarHtml(c, "md") + presenceDot + "</span>" +
           '<div class="info">' +
           "<h4>" + H.escapeHtml(c.displayName) + (c.unreadCount ? '<span class="msg-unread-dot"></span>' : "") + "</h4>" +
           '<p class="preview' + (c.unreadCount ? " unread" : "") + '">' + H.escapeHtml(preview) + "</p>" +
           "</div>" +
-          '<div class="meta"><time>' + (c.lastMessageAt ? fmtTime(c.lastMessageAt) : "") + "</time></div>" +
+          '<div class="meta">' +
+          '<button type="button" class="msg-star-btn' + (c.isStarred ? " is-starred" : "") + '" data-star="' + c.id + '" aria-label="' + (c.isStarred ? "Unstar conversation" : "Star conversation") + '">' + (c.isStarred ? "&#9733;" : "&#9734;") + "</button>" +
+          '<time>' + (c.lastMessageAt ? fmtTime(c.lastMessageAt) : "") + "</time>" +
+          "</div>" +
           "</div>"
         );
       })
       .join("");
     listEl.querySelectorAll(".msg-conv-item").forEach(function (el) {
       el.addEventListener("click", function () { openThread(Number(el.dataset.id)); });
+    });
+    listEl.querySelectorAll("[data-star]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var conversationId = Number(btn.dataset.star);
+        H.api("star-conversation", { method: "POST", body: { conversationId: conversationId } })
+          .then(function (d) {
+            var conv = conversations.find(function (c) { return c.id === conversationId; });
+            if (conv) conv.isStarred = d.isStarred;
+            renderConvList(searchInput.value.trim());
+          })
+          .catch(function (err) { H.toast(err.message, true); });
+      });
     });
   }
 
@@ -201,25 +240,43 @@
   var currentMessages = [];
   function renderMessages(messages) {
     currentMessages = messages;
-    bodyEl.innerHTML = messages.length
-      ? messages
-          .map(function (m, i) {
-            // A read receipt on every bubble is noisy and redundant —
-            // only the last message I sent needs one, same as most
-            // chat apps.
-            var isLastMine = m.isMine && !messages.slice(i + 1).some(function (later) { return later.isMine; });
-            var receipt = isLastMine ? '<span class="msg-bubble-receipt' + (m.isRead ? " is-read" : "") + '">' + (m.isRead ? "Read" : "Sent") + "</span>" : "";
-            var edited = m.isEdited ? '<span class="msg-bubble-edited">(edited)</span>' : "";
-            var editBtn = m.isMine ? '<button type="button" class="msg-edit-btn" data-edit-msg="' + m.id + '" aria-label="Edit message">&#9998;</button>' : "";
-            return (
-              '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + '" data-msg-id="' + m.id + '">' +
-              '<div class="msg-bubble-col">' +
-              '<div class="msg-bubble-wrap"><div class="msg-bubble">' + linkifyHtml(m.content) + "</div>" + editBtn + "</div>" +
-              '<div class="msg-bubble-time">' + edited + "<span>" + fmtTime(m.createdAt) + "</span>" + receipt + "</div></div></div>"
-            );
-          })
-          .join("")
-      : '<div class="hub-empty">No messages yet — say hello.</div>';
+    if (!messages.length) {
+      bodyEl.innerHTML = '<div class="hub-empty">No messages yet — say hello.</div>';
+      wireEditButtons();
+      return;
+    }
+    var html = "";
+    var lastDateKey = null;
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      var dateKey = new Date(m.createdAt).toDateString();
+      var isNewDay = dateKey !== lastDateKey;
+      if (isNewDay) {
+        html += '<div class="msg-day-divider"><span>' + H.escapeHtml(fmtDayDivider(m.createdAt)) + "</span></div>";
+        lastDateKey = dateKey;
+      }
+      var prev = messages[i - 1];
+      var next = messages[i + 1];
+      // Consecutive messages from the same sender on the same day read
+      // as one "burst" — tightened spacing between them instead of a
+      // repeated timestamp under every single bubble.
+      var isGroupStart = isNewDay || !prev || prev.isMine !== m.isMine;
+      var isLastInGroup = !next || next.isMine !== m.isMine || new Date(next.createdAt).toDateString() !== dateKey;
+
+      // A read receipt on every bubble is noisy and redundant — only
+      // the last message I sent needs one, same as most chat apps.
+      var isLastMine = m.isMine && !messages.slice(i + 1).some(function (later) { return later.isMine; });
+      var receipt = isLastMine ? '<span class="msg-bubble-receipt' + (m.isRead ? " is-read" : "") + '">' + (m.isRead ? "Read" : "Sent") + "</span>" : "";
+      var edited = m.isEdited ? '<span class="msg-bubble-edited">(edited)</span>' : "";
+      var editBtn = m.isMine ? '<button type="button" class="msg-edit-btn" data-edit-msg="' + m.id + '" aria-label="Edit message">&#9998;</button>' : "";
+      var meta = isLastInGroup ? '<div class="msg-bubble-time">' + edited + "<span>" + fmtTime(m.createdAt) + "</span>" + receipt + "</div>" : "";
+      html +=
+        '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + (isGroupStart ? " is-group-start" : " is-grouped") + '" data-msg-id="' + m.id + '">' +
+        '<div class="msg-bubble-col">' +
+        '<div class="msg-bubble-wrap"><div class="msg-bubble">' + linkifyHtml(m.content) + "</div>" + editBtn + "</div>" +
+        meta + "</div></div>";
+    }
+    bodyEl.innerHTML = html;
     wireEditButtons();
   }
 
@@ -309,6 +366,13 @@
   inputEl.addEventListener("input", pingTyping);
 
   searchInput.addEventListener("input", function () { renderConvList(searchInput.value.trim()); });
+  document.querySelectorAll(".msg-filter-pill").forEach(function (pill) {
+    pill.addEventListener("click", function () {
+      activeFilter = pill.dataset.filter;
+      document.querySelectorAll(".msg-filter-pill").forEach(function (p) { p.classList.toggle("is-active", p === pill); });
+      renderConvList(searchInput.value.trim());
+    });
+  });
   // On mobile, going "back" just switches the pane back to the list —
   // activeOtherId stays set so the thread's data (and its background
   // polling) keeps up to date, and reopening it is instant.

@@ -615,11 +615,14 @@ export default async function handler(req, res) {
       const rows = await sql`
         SELECT id, iek_number, display_name, name, discipline, company, title,
                location, profile_photo, last_login,
-               COUNT(*) OVER() AS total_count
+               COUNT(*) OVER() AS total_count,
+               (SELECT status FROM connections WHERE (requester_id = ${session.id} AND addressee_id = engineers.id) OR (requester_id = engineers.id AND addressee_id = ${session.id})) AS conn_status,
+               (SELECT requester_id FROM connections WHERE (requester_id = ${session.id} AND addressee_id = engineers.id) OR (requester_id = engineers.id AND addressee_id = ${session.id})) AS conn_requester_id
         FROM engineers
         WHERE (${q}::text = '' OR display_name ILIKE ${like} OR name ILIKE ${like}
                OR company ILIKE ${like} OR iek_number ILIKE ${like} OR title ILIKE ${like})
           AND (${discipline}::text = '' OR discipline = ${discipline})
+          AND id != ${session.id}
         ORDER BY ${sort === "recent" ? sql`last_login DESC NULLS LAST` : sql`COALESCE(display_name, name) ASC`}
         LIMIT ${limit} OFFSET ${offset}
       `;
@@ -640,6 +643,7 @@ export default async function handler(req, res) {
           location: e.location,
           profilePhoto: e.profile_photo,
           verified: true,
+          connectionStatus: e.conn_status === "accepted" ? "connected" : e.conn_status === "pending" ? (e.conn_requester_id === session.id ? "pending_outgoing" : "pending_incoming") : "none",
         })),
         total: rows[0]?.total_count ? Number(rows[0].total_count) : 0,
         disciplines: disciplines.map((d) => d.discipline),
@@ -1425,7 +1429,8 @@ export default async function handler(req, res) {
                CASE WHEN c.participant1_id = ${session.id} THEN c.participant2_id ELSE c.participant1_id END AS other_id,
                (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_content,
                (SELECT sender_id FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_sender_id,
-               (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id AND is_read = FALSE AND sender_id != ${session.id}) AS unread_count
+               (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id AND is_read = FALSE AND sender_id != ${session.id}) AS unread_count,
+               EXISTS(SELECT 1 FROM starred_conversations WHERE engineer_id = ${session.id} AND conversation_id = c.id) AS is_starred
         FROM conversations c
         WHERE c.participant1_id = ${session.id} OR c.participant2_id = ${session.id}
         ORDER BY c.last_message_at DESC NULLS LAST
@@ -1465,9 +1470,32 @@ export default async function handler(req, res) {
           lastMessageIsMine: r.last_sender_id === session.id,
           lastMessageAt: r.last_message_at,
           unreadCount: Number(r.unread_count),
+          isStarred: r.is_starred,
         })),
         totalUnread: rows.reduce((sum, r) => sum + Number(r.unread_count), 0),
       });
+    }
+
+    if (action === "star-conversation") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const conversationId = Number((req.body || {}).conversationId);
+      if (!conversationId) return res.status(400).json({ error: "conversationId is required." });
+      // Ownership check: only star a conversation you're actually part of.
+      const [conv] = await sql`SELECT id FROM conversations WHERE id = ${conversationId} AND (participant1_id = ${session.id} OR participant2_id = ${session.id})`;
+      if (!conv) return res.status(404).json({ error: "Conversation not found." });
+
+      const [existing] = await sql`SELECT 1 FROM starred_conversations WHERE engineer_id = ${session.id} AND conversation_id = ${conversationId}`;
+      if (existing) {
+        await sql`DELETE FROM starred_conversations WHERE engineer_id = ${session.id} AND conversation_id = ${conversationId}`;
+        return res.status(200).json({ isStarred: false });
+      }
+      await sql`INSERT INTO starred_conversations (engineer_id, conversation_id) VALUES (${session.id}, ${conversationId})`;
+      return res.status(200).json({ isStarred: true });
     }
 
     if (action === "messages") {

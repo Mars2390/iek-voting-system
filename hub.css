@@ -119,6 +119,9 @@
 .hub-person-card h3 { margin: 12px 0 0; font-size: 16px; font-weight: 700; color: var(--ink); }
 .hub-person-card .role { margin: 2px 0 0; font-size: 13.5px; color: var(--ink-muted); }
 .hub-person-card .badge-row { margin: 8px 0 0; display: flex; justify-content: center; }
+.dir-action-wrap { margin-top: 14px; }
+.dir-action-btn { padding: 8px 20px; font-size: 13px; }
+.dir-action-btn.is-disabled { pointer-events: none; opacity: 0.65; }
 
 .hub-verified-badge {
   display: inline-flex; align-items: center; gap: 4px;

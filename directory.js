@@ -17,16 +17,59 @@
   var disciplinesLoaded = false;
   var debounceTimer = null;
 
+  // "Connect easily" — a directory card used to only link through to the
+  // full profile page to send a request; putting the action right on
+  // the card (matching every other professional network) saves that
+  // extra hop for the common case.
   function personCard(e) {
     var role = [e.title, e.company].filter(Boolean).join(" at ") || e.discipline || "";
+    var action;
+    if (e.connectionStatus === "connected") {
+      action = '<a href="/messages.html?with=' + e.id + '" class="eh-btn eh-btn-ghost-light hub-btn-sm dir-action-btn" data-stop>Message</a>';
+    } else if (e.connectionStatus === "pending_outgoing") {
+      action = '<span class="eh-btn eh-btn-ghost-light hub-btn-sm dir-action-btn is-disabled">Pending</span>';
+    } else if (e.connectionStatus === "pending_incoming") {
+      action = '<a href="/connections.html" class="eh-btn eh-btn-primary hub-btn-sm dir-action-btn" data-stop>Respond</a>';
+    } else {
+      action = '<button type="button" class="eh-btn eh-btn-primary hub-btn-sm dir-action-btn" data-connect="' + e.id + '">+ Connect</button>';
+    }
     return (
       '<a href="/profile.html?id=' + e.id + '" class="hub-person-card">' +
       H.avatarHtml(e, "lg") +
       "<h3>" + H.escapeHtml(e.displayName) + "</h3>" +
       '<p class="role">' + H.escapeHtml(role) + "</p>" +
       '<div class="badge-row"><span class="hub-verified-badge">Verified</span></div>' +
+      '<div class="dir-action-wrap">' + action + "</div>" +
       "</a>"
     );
+  }
+
+  function wireCardActions() {
+    // The action sits inside the card's own <a href="/profile...">, so
+    // any click on it has to stop the click from bubbling to that
+    // anchor and navigating away instead of doing the action.
+    grid.querySelectorAll("[data-stop]").forEach(function (el) {
+      el.addEventListener("click", function (e) { e.stopPropagation(); });
+    });
+    grid.querySelectorAll("[data-connect]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var id = Number(btn.dataset.connect);
+        btn.disabled = true;
+        H.api("connections", { method: "POST", body: { addresseeId: id } })
+          .then(function () {
+            btn.textContent = "Pending";
+            btn.classList.remove("eh-btn-primary");
+            btn.classList.add("eh-btn-ghost-light", "is-disabled");
+            H.toast("Connection request sent");
+          })
+          .catch(function (err) {
+            btn.disabled = false;
+            H.toast(err.message, true);
+          });
+      });
+    });
   }
 
   function search(reset) {
@@ -44,6 +87,7 @@
         total = data.total;
         if (reset) grid.innerHTML = "";
         grid.insertAdjacentHTML("beforeend", data.engineers.map(personCard).join(""));
+        wireCardActions();
         offset += data.engineers.length;
         countEl.textContent = total + " engineer" + (total === 1 ? "" : "s") + (searchInput.value.trim() ? ' matching "' + searchInput.value.trim() + '"' : "");
         loadMoreWrap.hidden = offset >= total;

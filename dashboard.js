@@ -55,11 +55,34 @@
                 '<a href="/profile.html?id=' + s.id + '" class="db-suggestion-card">' +
                 H.avatarHtml(s, "sm") +
                 '<div class="info"><h4>' + H.escapeHtml(s.displayName) + "</h4><p>" + H.escapeHtml(role) + "</p></div>" +
+                '<button type="button" class="db-suggestion-connect" data-connect="' + s.id + '" data-stop aria-label="Connect with ' + H.escapeHtml(s.displayName) + '">+</button>' +
                 "</a>"
               );
             })
             .join("")
         : '<div class="hub-empty" style="padding:16px 0;">No suggestions yet.</div>';
+
+      sugEl.querySelectorAll("[data-stop]").forEach(function (el) {
+        el.addEventListener("click", function (e) { e.stopPropagation(); });
+      });
+      sugEl.querySelectorAll("[data-connect]").forEach(function (btn) {
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var id = Number(btn.dataset.connect);
+          btn.disabled = true;
+          H.api("connections", { method: "POST", body: { addresseeId: id } })
+            .then(function () {
+              btn.textContent = "✓";
+              btn.classList.add("is-sent");
+              H.toast("Connection request sent");
+            })
+            .catch(function (err) {
+              btn.disabled = false;
+              H.toast(err.message, true);
+            });
+        });
+      });
 
       document.getElementById("db-loading").hidden = true;
       document.getElementById("db-content").hidden = false;
