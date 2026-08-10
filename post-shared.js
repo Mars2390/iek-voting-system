@@ -207,6 +207,18 @@ window.HubPosts = (function () {
   // reloadFn is called after an action that changes list order/membership
   // (delete, pin) so the caller can decide how to refresh (full re-fetch
   // for the Home feed, same for a profile's post list).
+  // Every popover that can be open on a post (reaction picker, "..."
+  // menu) shares one rule: opening any of them closes every other one
+  // first, not just other instances of its own kind — two floating
+  // popovers open at once looks broken regardless of whether they're
+  // the same type. Scoped to containerEl since a page can have more than
+  // one independent post list (e.g. the profile preview carousel).
+  function closeAllPopovers(containerEl) {
+    containerEl.querySelectorAll(".feed-reaction-picker.is-open, .feed-post-menu.is-open").forEach(function (el) {
+      el.classList.remove("is-open");
+    });
+  }
+
   function wireContainer(containerEl, reloadFn) {
     containerEl.querySelectorAll("[data-react-quick]").forEach(function (btn) {
       btn.onclick = function () { sendReaction(containerEl, btn.dataset.reactQuick, "like"); };
@@ -217,7 +229,7 @@ window.HubPosts = (function () {
         var postId = btn.dataset.reactCaret;
         var picker = containerEl.querySelector('[data-picker="' + postId + '"]');
         var wasOpen = picker.classList.contains("is-open");
-        containerEl.querySelectorAll(".feed-reaction-picker.is-open").forEach(function (p) { p.classList.remove("is-open"); });
+        closeAllPopovers(containerEl);
         if (!wasOpen) picker.classList.add("is-open");
       };
     });
@@ -272,7 +284,18 @@ window.HubPosts = (function () {
     });
 
     containerEl.querySelectorAll("[data-menu-toggle]").forEach(function (btn) {
-      btn.onclick = function (e) { e.stopPropagation(); btn.closest("[data-menu]").classList.toggle("is-open"); };
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        // stopPropagation here means the document-level "click outside
+        // closes it" listener below never runs for this click, so a
+        // second post's menu button doesn't count as "outside" the first
+        // post's still-open menu — without closing other popovers
+        // explicitly first, both stack open at once.
+        var menu = btn.closest("[data-menu]");
+        var wasOpen = menu.classList.contains("is-open");
+        closeAllPopovers(containerEl);
+        if (!wasOpen) menu.classList.add("is-open");
+      };
     });
     containerEl.querySelectorAll("[data-delete]").forEach(function (btn) {
       btn.onclick = function () {

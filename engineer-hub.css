@@ -20,6 +20,7 @@
 
   --green-600: #007a3d;
   --green-700: #005c2d;
+  --green-500: #34c471;
   --green-100: #dcefe4;
 
   --amber-600: #b9812c;
@@ -107,7 +108,12 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: -0.01em;
 }
 .eh-brand-text .name em { color: var(--red-500); font-style: normal; }
-.eh-brand-text .tag { font-size: 10.5px; color: rgba(255,255,255,0.5); font-weight: 500; }
+/* Before scroll, .eh-nav is a mostly-transparent glass bar over
+   whatever's in the hero behind it (blur softens edges, not brightness)
+   — 50%-opacity white text has no guaranteed contrast floor against an
+   arbitrary photo, so it needs its own shadow rather than relying on
+   the nav backdrop alone. */
+.eh-brand-text .tag { font-size: 10.5px; color: rgba(255,255,255,0.65); font-weight: 500; text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
 
 .eh-nav-links {
   display: none;
@@ -199,6 +205,12 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: transform 0.25s var(--ease), background-color 0.25s, border-color 0.25s, box-shadow 0.25s;
 }
+/* Press feedback (every variant lifts on hover, so pressing should read
+   as "going back down", not just stopping) and a visible focus ring for
+   keyboard users — outline:none with nothing to replace it is a common
+   accessibility miss on pill-shaped custom buttons like these. */
+.eh-btn:active { transform: translateY(0) scale(0.97); }
+.eh-btn:focus-visible { outline: 2px solid var(--red-600); outline-offset: 2px; }
 .eh-btn-primary {
   background: var(--red-600);
   color: #fff;
@@ -245,9 +257,15 @@ a { color: inherit; text-decoration: none; }
 .eh-hero-slide::after {
   content: "";
   position: absolute; inset: 0;
+  /* Three layers, not one: the diagonal scrim carries the headline's
+     side of the frame, a flat wash guarantees a contrast floor even
+     over a bright sky/water photo the diagonal alone wouldn't cover,
+     and the bottom-up layer protects the CTA row/dots that sit low in
+     the frame regardless of which photo is active. */
   background:
-    linear-gradient(100deg, rgba(10,10,10,0.92) 10%, rgba(10,10,10,0.55) 45%, rgba(10,10,10,0.25) 75%),
-    linear-gradient(0deg, rgba(10,10,10,0.75) 0%, transparent 40%);
+    linear-gradient(100deg, rgba(10,10,10,0.94) 15%, rgba(10,10,10,0.62) 48%, rgba(10,10,10,0.32) 78%),
+    rgba(10,10,10,0.18),
+    linear-gradient(0deg, rgba(10,10,10,0.8) 0%, transparent 45%);
 }
 @media (prefers-reduced-motion: reduce) {
   .eh-hero-slide img { animation: none; }
@@ -306,7 +324,15 @@ a { color: inherit; text-decoration: none; }
   font-size: 16.5px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--green-600);
+  /* --green-600 is a dark, saturated green tuned for text on a LIGHT
+     surface — placed over the hero's dark scrim it was dark-on-dark,
+     exactly the "unreadable on dark backgrounds" complaint, and no
+     amount of strengthening the scrim underneath it could fix that
+     (a darker scrim makes dark text on it worse, not better).
+     --green-500 is the same brand green shifted bright enough to read
+     against a dark background. */
+  color: var(--green-500);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.35);
 }
 .eh-hero p.eh-lede {
   max-width: 48ch;
@@ -618,6 +644,18 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 0 3px var(--red-100);
 }
 .lg-field small { font-size: 12px; color: var(--ink-muted); }
+
+/* Every other text input/textarea/select across the site sets its own
+   border-color:focus already, but only .lg-field and .hub-filterbar had
+   the accompanying focus glow — applied universally here rather than
+   duplicated per-file so the same focus treatment is guaranteed
+   consistent everywhere, including places that add inputs later. */
+input[type="text"]:focus, input[type="email"]:focus, input[type="url"]:focus,
+input[type="tel"]:focus, input[type="number"]:focus, input[type="password"]:focus,
+input[type="datetime-local"]:focus, input[type="search"]:focus,
+textarea:focus, select:focus {
+  box-shadow: 0 0 0 3px var(--red-100);
+}
 
 .lg-error {
   background: var(--red-100);

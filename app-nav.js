@@ -119,7 +119,13 @@
 
   var burger = document.getElementById("db-nav-burger");
   var mobileMenu = document.getElementById("db-mobile-menu");
-  burger.addEventListener("click", function () {
+  burger.addEventListener("click", function (e) {
+    e.stopPropagation();
+    // Search and the notification bell stay visible at every width
+    // (including alongside this burger on mobile), so the same
+    // stacking bug applies here too — closing them first before
+    // opening the drawer.
+    closeSearchAndNotifPanels(null);
     var isOpen = mobileMenu.classList.toggle("is-open");
     burger.classList.toggle("is-open", isOpen);
     burger.setAttribute("aria-expanded", String(isOpen));
@@ -293,9 +299,39 @@
       .catch(function () {});
   }
 
+  // The search button and bell button each stopPropagation their own
+  // click (needed so the document-level "click outside closes it"
+  // listeners below don't immediately close the panel that same click
+  // just opened) — but that also means clicking the bell while search is
+  // open never reaches the document listener that would've closed
+  // search, and vice versa, so both stayed open stacked on top of each
+  // other. Closing the sibling panel explicitly before opening this one
+  // fixes it without touching the outside-click behavior either relies on.
+  function closeSearchAndNotifPanels(exceptPanel) {
+    [searchPanel, notifPanel].forEach(function (p) {
+      if (p && p !== exceptPanel) p.hidden = true;
+    });
+  }
+  function closeMobileDrawer() {
+    mobileMenu.classList.remove("is-open");
+    burger.classList.remove("is-open");
+    burger.setAttribute("aria-expanded", "false");
+  }
+  // Search and the bell stay visible at every width, including
+  // alongside the burger on mobile, so opening either one should also
+  // close the drawer if it's open — but the burger's own handler
+  // manages the drawer's open/closed state itself (including closing
+  // it back), so it only needs the search/notif half of this, not a
+  // version that would also fight its own toggle.
+  function closeOtherNavPanels(exceptPanel) {
+    closeSearchAndNotifPanels(exceptPanel);
+    closeMobileDrawer();
+  }
+
   searchBtn.addEventListener("click", function (e) {
     e.stopPropagation();
     var opening = searchPanel.hidden;
+    closeOtherNavPanels(searchPanel);
     searchPanel.hidden = !opening;
     if (opening) {
       renderSearchResults(searchInput.value.trim());
@@ -322,6 +358,7 @@
   bellBtn.addEventListener("click", function (e) {
     e.stopPropagation();
     var opening = notifPanel.hidden;
+    closeOtherNavPanels(notifPanel);
     notifPanel.hidden = !opening;
     if (opening) renderNotifList();
   });

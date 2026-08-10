@@ -1,0 +1,24 @@
+.lg-simple-nav {
+  padding: 18px 20px; background: var(--black); border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.lg-simple-nav .eh-brand-text .name { color: #fff; }
+
+.legal-page { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+.legal-card { padding: 36px 32px; }
+.legal-card h1 { margin: 6px 0 4px; font-size: clamp(1.6rem, 3vw, 2.1rem); font-family: var(--font-display); font-weight: 800; color: var(--ink); }
+.legal-updated { margin: 0 0 28px; font-size: 12.5px; font-weight: 600; color: var(--ink-muted); }
+.legal-card > p { font-size: 15px; line-height: 1.7; color: var(--ink); margin: 0 0 20px; }
+.legal-card h2 {
+  margin: 34px 0 12px; font-size: 17px; font-weight: 800; color: var(--ink);
+  font-family: var(--font-display); padding-top: 20px; border-top: 1px solid var(--border);
+}
+.legal-card h2:first-of-type { border-top: none; padding-top: 0; }
+.legal-card ul { margin: 0 0 20px; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; }
+.legal-card li { font-size: 14.5px; line-height: 1.65; color: var(--ink); }
+.legal-card li strong { color: var(--ink); }
+.legal-card a { color: var(--red-600); font-weight: 600; text-decoration: none; }
+.legal-card a:hover { text-decoration: underline; }
+
+@media (max-width: 640px) {
+  .legal-card { padding: 26px 20px; }
+}
