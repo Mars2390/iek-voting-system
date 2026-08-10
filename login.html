@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/theme-init.js"></script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="/favicon.ico" sizes="48x48" />
@@ -58,19 +59,19 @@
 
       <label class="lg-field" id="lg-number-group">
         <span>Membership number</span>
-        <input type="text" name="membershipNumber" id="lg-number" placeholder="e.g. M.1234" autocomplete="off" inputmode="numeric" required />
+        <input type="text" name="membershipNumber" id="lg-number" placeholder="e.g. M.1234" autocomplete="username" inputmode="numeric" required />
         <small>Any format works — M.1234, M1234, or just 1234.</small>
       </label>
 
       <label class="lg-field" id="lg-pin-group" hidden>
         <span id="lg-pin-label">PIN</span>
-        <input type="password" name="pin" id="lg-pin" placeholder="4-6 digit PIN" autocomplete="off" inputmode="numeric" maxlength="6" />
+        <input type="password" name="pin" id="lg-pin" placeholder="4-6 digit PIN" autocomplete="current-password" inputmode="numeric" maxlength="6" />
         <small id="lg-pin-hint"></small>
       </label>
 
       <label class="lg-field" id="lg-pin-confirm-group" hidden>
         <span>Confirm PIN</span>
-        <input type="password" id="lg-pin-confirm" placeholder="Re-enter PIN" autocomplete="off" inputmode="numeric" maxlength="6" />
+        <input type="password" id="lg-pin-confirm" placeholder="Re-enter PIN" autocomplete="new-password" inputmode="numeric" maxlength="6" />
       </label>
 
       <div id="lg-error" class="lg-error" hidden></div>

@@ -80,6 +80,10 @@
     '<div id="nav-search-results" class="nav-notif-list"></div>' +
     "</div>" +
     "</div>" +
+    '<button id="nav-theme-btn" class="nav-bell-btn" type="button" aria-label="Switch between light and dark mode">' +
+    '<svg id="nav-theme-icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5" /><path d="M12 2.5v2.5M12 19v2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2.5 12H5M19 12h2.5M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" /></svg>' +
+    '<svg id="nav-theme-icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M20 14.5A8.5 8.5 0 119.5 4a7 7 0 0010.5 10.5z" /></svg>' +
+    "</button>" +
     '<div class="nav-bell-wrap">' +
     '<button id="nav-bell-btn" class="nav-bell-btn" type="button" aria-label="Notifications">' +
     '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 01-3.46 0" /></svg>' +
@@ -116,6 +120,30 @@
   }
   document.getElementById("db-logout").addEventListener("click", doLogout);
   document.getElementById("db-logout-mobile").addEventListener("click", doLogout);
+
+  // ---------- Theme toggle ----------
+  var THEME_KEY = "eh_theme";
+  var themeBtn = document.getElementById("nav-theme-btn");
+  var sunIcon = document.getElementById("nav-theme-icon-sun");
+  var moonIcon = document.getElementById("nav-theme-icon-moon");
+  function currentlyDark() {
+    var saved = localStorage.getItem(THEME_KEY);
+    if (saved === "dark") return true;
+    if (saved === "light") return false;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  function updateThemeIcon() {
+    var dark = currentlyDark();
+    sunIcon.hidden = dark;
+    moonIcon.hidden = !dark;
+  }
+  updateThemeIcon();
+  themeBtn.addEventListener("click", function () {
+    var next = currentlyDark() ? "light" : "dark";
+    localStorage.setItem(THEME_KEY, next);
+    document.documentElement.setAttribute("data-theme", next);
+    updateThemeIcon();
+  });
 
   var burger = document.getElementById("db-nav-burger");
   var mobileMenu = document.getElementById("db-mobile-menu");

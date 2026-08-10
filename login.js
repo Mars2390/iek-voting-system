@@ -2,6 +2,7 @@
   "use strict";
 
   var STORAGE_KEY = "eh_session_token";
+  var REMEMBER_KEY = "eh_remembered_number";
 
   // Already logged in? Skip straight to the dashboard.
   var existingToken = localStorage.getItem(STORAGE_KEY);
@@ -32,6 +33,15 @@
   // "enter-pin": account already has a PIN — this login checks it.
   var mode = "credentials";
 
+  // The membership number isn't sensitive on its own (it's the
+  // username, not the secret — the PIN is what actually protects the
+  // account), so remembering it locally for a faster return visit is
+  // safe. The PIN itself is never stored here; autocomplete tokens
+  // below let the browser's OWN password manager offer to remember
+  // that part, which is the appropriate place for a secret to live.
+  var rememberedNumber = localStorage.getItem(REMEMBER_KEY);
+  if (rememberedNumber) document.getElementById("lg-number").value = rememberedNumber;
+
   function showError(message) {
     errorBox.textContent = message;
     errorBox.hidden = false;
@@ -56,6 +66,11 @@
     submitLabel.textContent = "Create PIN & log in";
     pinInput.value = "";
     pinConfirmInput.value = "";
+    // Same field the "enter-pin" step reuses as current-password — a
+    // browser autofill dropdown offering an old PIN while setting a new
+    // one would be actively wrong here, so this only applies for the
+    // duration of this mode.
+    pinInput.autocomplete = "new-password";
     pinInput.focus();
   }
 
@@ -70,6 +85,7 @@
     pinConfirmGroup.hidden = true;
     submitLabel.textContent = "Log in";
     pinInput.value = "";
+    pinInput.autocomplete = "current-password";
     pinInput.focus();
   }
 
@@ -128,6 +144,7 @@
         if (result.data.needsPinSetup) return enterSetupPinMode();
         if (result.data.needsPin) return enterEnterPinMode();
         localStorage.setItem(STORAGE_KEY, result.data.token);
+        localStorage.setItem(REMEMBER_KEY, membershipNumber);
         window.location.href = "/dashboard.html";
       })
       .catch(function () {

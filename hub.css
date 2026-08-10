@@ -12,7 +12,7 @@
 /* Applied by hub-common.js's document-level image error handler — a
    failed <img> load (deleted Blob, corrupt file, dead URL) swaps to a
    neutral placeholder instead of the browser's broken-image icon. */
-.hub-img-broken { object-fit: contain !important; padding: 12%; box-sizing: border-box; background: #eef0f2; }
+.hub-img-broken { object-fit: contain !important; padding: 12%; box-sizing: border-box; background: var(--surface-sunken); }
 
 .hub-main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 80px; }
 
@@ -34,7 +34,16 @@
     linear-gradient(100deg, rgba(10,10,10,0.94) 22%, rgba(10,10,10,0.68) 65%, rgba(10,10,10,0.4) 100%),
     rgba(10,10,10,0.15);
 }
-.hub-banner-inner { position: relative; max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+/* z-index matters here, not just position:relative — ::after (the dark
+   gradient scrim) is generated as the last child of .hub-banner, so
+   without an explicit stacking order it paints on top of this content
+   instead of behind it, dimming the heading/text underneath its own
+   overlay. Confirmed by pixel inspection, not just computed styles: the
+   text's own color/opacity reported correctly as white/1 while still
+   rendering washed out, which only makes sense if something else was
+   compositing on top of it. Same z-index:1 pattern .eh-hero-content
+   already uses correctly for the identical situation on the landing hero. */
+.hub-banner-inner { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 0 20px; }
 .hub-banner .eh-eyebrow { color: var(--green-500, #34c471); }
 .hub-banner h1 {
   font-family: var(--font-display);
@@ -252,3 +261,13 @@
   /* The fixed bottom tab bar already claims this space. */
   .app-footer-row { padding-bottom: 20px; }
 }
+
+/* Label/value list — moved here from profile.css since settings.html
+   uses the exact same "row" markup for its account details but never
+   loaded profile.css, so it rendered as unstyled run-on text with no
+   visual separation between label and value at all. */
+.pf-contact-list { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.pf-contact-list .row { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; }
+.pf-contact-list dt { color: var(--ink-muted); font-weight: 600; }
+.pf-contact-list dd { margin: 0; color: var(--ink); font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.pf-contact-list dd a { color: var(--red-600); }

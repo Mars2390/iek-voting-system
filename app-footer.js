@@ -9,7 +9,7 @@
   mount.innerHTML =
     '<footer class="app-footer">' +
     '<div class="app-footer-row">' +
-    '<span class="app-footer-copy">&copy; ' + new Date().getFullYear() + ' Engineer Hub — an independent network for IEK-affiliated engineers, not an official IEK product.</span>' +
+    '<span class="app-footer-copy">&copy; ' + new Date().getFullYear() + " Engineer Hub</span>" +
     '<nav class="app-footer-links">' +
     '<a href="/privacy.html">Privacy Policy</a>' +
     '<a href="/terms.html">Terms of Use</a>' +

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script src="/theme-init.js"></script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="icon" href="/favicon.ico" sizes="48x48" />
@@ -22,7 +23,7 @@
 
 <div id="app-nav" data-active="home"></div>
 
-<main class="hub-page">
+<main class="hub-page db-page">
   <div id="db-loading" class="hub-loading" style="padding-top:80px;">Loading your dashboard…</div>
 
   <div id="db-content" class="hub-main" hidden>
@@ -36,14 +37,14 @@
         <div class="db-progress"><div id="db-progress-bar" class="db-progress-bar" style="width:0%"></div></div>
         <a id="db-completion-hint" class="db-completion-hint" href="/profile.html"></a>
       </div>
-      <div class="hub-card db-stat-card">
+      <a href="/connections.html" class="hub-card db-stat-card db-stat-card-link">
         <span class="db-stat-num" id="db-stat-connections">0</span>
         <span class="db-stat-label">Connections</span>
-      </div>
-      <div class="hub-card db-stat-card">
+      </a>
+      <a href="/connections.html" class="hub-card db-stat-card db-stat-card-link">
         <span class="db-stat-num" id="db-stat-pending">0</span>
         <span class="db-stat-label">Pending requests</span>
-      </div>
+      </a>
     </div>
 
     <div class="db-grid3">
@@ -59,13 +60,25 @@
           </a>
         </section>
 
-        <section class="hub-card" style="margin-top:20px;">
+        <section class="hub-card db-quick-actions" style="margin-top:20px;">
           <h2 class="db-section-h">Quick actions</h2>
-          <div class="db-actions">
-            <a href="/profile.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Edit profile</a>
-            <a href="/directory.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Find engineers</a>
-            <a href="/jobs.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Browse jobs</a>
-            <a href="/calendar.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">IEK Calendar</a>
+          <div class="db-actions-grid">
+            <a href="/profile.html" class="db-action-tile">
+              <span class="db-action-icon"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg></span>
+              Edit profile
+            </a>
+            <a href="/directory.html" class="db-action-tile">
+              <span class="db-action-icon"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg></span>
+              Find engineers
+            </a>
+            <a href="/jobs.html" class="db-action-tile">
+              <span class="db-action-icon"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" /></svg></span>
+              Browse jobs
+            </a>
+            <a href="/calendar.html" class="db-action-tile">
+              <span class="db-action-icon"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg></span>
+              IEK Calendar
+            </a>
           </div>
         </section>
       </aside>
