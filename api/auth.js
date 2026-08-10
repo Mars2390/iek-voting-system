@@ -34,6 +34,14 @@ const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB
 // (40MB was unrealistically tight — a 1080p clip from a modern phone
 // blows past that in under 30 seconds).
 const MAX_VIDEO_BYTES = 95 * 1024 * 1024; // 95MB
+// Message attachments: images reuse MAX_PHOTO_BYTES. Generic files (CVs,
+// drawings, PDFs) capped lower than video — a chat attachment realistically
+// doesn't need to be a huge file, and keeping it well under Vercel's 100MB
+// body ceiling keeps uploads fast on the mobile data most members are on.
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB
+// A voice note is compressed audio (opus/aac, not raw), so even several
+// minutes stays small — this is generous headroom, not a realistic ceiling.
+const MAX_VOICE_BYTES = 15 * 1024 * 1024; // 15MB
 const REACTION_TYPES = ["like", "love", "celebrate", "laugh", "wow", "sad", "angry"];
 const TYPING_WINDOW_MS = 8000;
 
@@ -1094,6 +1102,35 @@ export default async function handler(req, res) {
       return res.status(200).json({ url: blob.url });
     }
 
+    if (action === "upload-message-attachment") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const contentType = req.headers["content-type"] || "application/octet-stream";
+      // Classified by content-type, not by a client-supplied "type" field
+      // — the browser sets this from the actual file/Blob it read, so it
+      // can't be spoofed into e.g. claiming a .exe is an "image".
+      const attachmentType = contentType.startsWith("image/") ? "image" : contentType.startsWith("audio/") ? "voice" : "file";
+      const body = await readRawBody(req);
+      if (!body.length) return res.status(400).json({ error: "No file data received." });
+      const cap = attachmentType === "image" ? MAX_PHOTO_BYTES : attachmentType === "voice" ? MAX_VOICE_BYTES : MAX_FILE_BYTES;
+      if (body.length > cap) return res.status(413).json({ error: `File is too large. Keep it under ${Math.round(cap / 1024 / 1024)}MB.` });
+
+      // The raw body has no filename of its own — the client sends the
+      // original name (for real files, e.g. "CV_JaneDoe.pdf") as a query
+      // param since it can't ride along in a binary POST body.
+      const originalName = String(req.query.filename || "").slice(0, 255);
+      const extFromName = originalName.includes(".") ? originalName.split(".").pop().replace(/[^a-z0-9]/gi, "") : "";
+      const extFromType = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "");
+      const ext = extFromName || extFromType || "bin";
+      const folder = attachmentType === "image" ? "message-images" : attachmentType === "voice" ? "message-voice" : "message-files";
+      const blob = await put(`${folder}/${session.id}-${Date.now()}.${ext}`, body, { access: "public", contentType });
+      return res.status(200).json({ url: blob.url, type: attachmentType, size: body.length, name: originalName || null });
+    }
+
     if (action === "react-post") {
       if (req.method !== "POST") {
         res.setHeader("Allow", "POST, OPTIONS");
@@ -1514,7 +1551,9 @@ export default async function handler(req, res) {
         if (!conv) return res.status(200).json({ conversationId: null, messages: [] });
 
         const messages = await sql`
-          SELECT id, sender_id, content, is_read, created_at, edited_at FROM messages
+          SELECT id, sender_id, content, is_read, created_at, edited_at,
+                 attachment_url, attachment_type, attachment_name, attachment_size, attachment_duration
+          FROM messages
           WHERE conversation_id = ${conv.id} ORDER BY created_at ASC LIMIT 200
         `;
         // Awaited for the same reason as the profile-view and last-active
@@ -1533,6 +1572,11 @@ export default async function handler(req, res) {
             createdAt: m.created_at,
             isEdited: !!m.edited_at,
             isMine: m.sender_id === session.id,
+            attachmentUrl: m.attachment_url,
+            attachmentType: m.attachment_type,
+            attachmentName: m.attachment_name,
+            attachmentSize: m.attachment_size,
+            attachmentDuration: m.attachment_duration,
           })),
         });
       }
@@ -1557,8 +1601,11 @@ export default async function handler(req, res) {
         const b = req.body || {};
         const otherId = Number(b.recipientId);
         const content = String(b.content || "").trim().slice(0, 4000);
+        const attachmentType = ["image", "file", "voice"].includes(b.attachmentType) ? b.attachmentType : null;
+        const attachmentUrl = attachmentType ? String(b.attachmentUrl || "") : null;
         if (!otherId || otherId === session.id) return res.status(400).json({ error: "Invalid recipient." });
-        if (!content) return res.status(400).json({ error: "Message can't be empty." });
+        if (!content && !attachmentUrl) return res.status(400).json({ error: "Message can't be empty." });
+        if (attachmentType && !attachmentUrl) return res.status(400).json({ error: "Attachment upload URL is missing." });
 
         const [conn] = await sql`
           SELECT id FROM connections
@@ -1576,13 +1623,29 @@ export default async function handler(req, res) {
           RETURNING *
         `;
         const [message] = await sql`
-          INSERT INTO messages (conversation_id, sender_id, content) VALUES (${conv.id}, ${session.id}, ${content}) RETURNING *
+          INSERT INTO messages (conversation_id, sender_id, content, attachment_url, attachment_type, attachment_name, attachment_size, attachment_duration)
+          VALUES (
+            ${conv.id}, ${session.id}, ${content || null},
+            ${attachmentUrl}, ${attachmentType},
+            ${attachmentType ? String(b.attachmentName || "").slice(0, 255) || null : null},
+            ${attachmentType ? Number(b.attachmentSize) || null : null},
+            ${attachmentType === "voice" ? Number(b.attachmentDuration) || null : null}
+          )
+          RETURNING *
         `;
         // Sending clears "typing" — otherwise the indicator can linger
         // up to TYPING_WINDOW_MS after the message already arrived.
         await sql`UPDATE conversations SET typing_by = NULL, typing_until = NULL WHERE id = ${conv.id}`;
         await notify(sql, otherId, session.id, "message", "conversation", conv.id);
-        return res.status(201).json({ conversationId: conv.id, message: { id: message.id, senderId: message.sender_id, content: message.content, isRead: message.is_read, createdAt: message.created_at, isEdited: false, isMine: true } });
+        return res.status(201).json({
+          conversationId: conv.id,
+          message: {
+            id: message.id, senderId: message.sender_id, content: message.content, isRead: message.is_read,
+            createdAt: message.created_at, isEdited: false, isMine: true,
+            attachmentUrl: message.attachment_url, attachmentType: message.attachment_type,
+            attachmentName: message.attachment_name, attachmentSize: message.attachment_size, attachmentDuration: message.attachment_duration,
+          },
+        });
       }
 
       res.setHeader("Allow", "GET, POST, PUT, OPTIONS");

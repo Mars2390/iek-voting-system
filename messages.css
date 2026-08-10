@@ -1,6 +1,14 @@
 .msg-shell {
   display: grid;
-  grid-template-columns: 1fr;
+  /* minmax(0, 1fr), not a bare 1fr — a bare 1fr track's minimum size is
+     "auto" (its content's own min-content width), so on mobile
+     .msg-thread (containing the composer's row of buttons + textarea +
+     Send) was overflowing its own 390px track up to 440px instead of
+     being forced to shrink into it. Confirmed by walking the DOM: the
+     grid container itself measured the correct 390px, but its
+     scrollWidth was 440px — the same class of bug as the dashboard
+     stat-row fix, one level higher in the tree. */
+  grid-template-columns: minmax(0, 1fr);
   /* dvh tracks the *actual* visible viewport, shrinking when mobile
      browser chrome (URL bar, etc.) is showing — vh is the address-bar
      height whether or not the bar is currently on screen, which is
@@ -167,12 +175,75 @@
 
 .msg-send-form { display: flex; gap: 10px; align-items: flex-end; padding: 14px 20px; border-top: 1px solid var(--border); }
 .msg-send-form textarea {
-  flex: 1; resize: none; max-height: 120px;
+  /* min-width: 0 overrides the flex item default of min-width: auto,
+     which otherwise floors this at the textarea's own min-content width
+     — on a narrow phone, with 3 new icon buttons added, that floor was
+     wider than the space actually left over, pushing Send off the edge
+     of the screen entirely (confirmed via bounding box: x=406 in a
+     390px viewport). The page's own overflow-x:hidden safety net
+     hides the symptom at the document level without fixing the real
+     problem — Send was still there, just unreachable. */
+  flex: 1; min-width: 0; resize: none; max-height: 120px;
   font-family: var(--font-body); font-size: 16px;
   padding: 10px 14px; border-radius: 14px; border: 1.5px solid var(--border);
   background: var(--bg); color: var(--ink); outline: none;
 }
 .msg-send-form textarea:focus { border-color: var(--red-600); }
+.msg-attach-btn {
+  flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer; color: var(--ink-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.msg-attach-btn:hover { background: var(--surface-sunken); color: var(--red-600); }
+#msg-voice-btn.is-recording { color: var(--red-600); }
+
+.msg-attachment-preview {
+  display: flex; align-items: center; gap: 10px; margin: 0 20px 10px;
+  padding: 8px 12px; border-radius: 12px; background: var(--surface-sunken); position: relative;
+}
+.msg-attachment-preview-img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; }
+.msg-attachment-preview-file { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--ink); overflow: hidden; }
+.msg-attachment-preview-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-attachment-remove {
+  margin-left: auto; flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--surface); border: 1px solid var(--border); color: var(--ink-muted);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.msg-attachment-remove:hover { color: var(--red-600); border-color: var(--red-600); }
+
+.msg-voice-recorder {
+  display: flex; align-items: center; gap: 10px; margin: 0 20px 10px;
+  padding: 10px 14px; border-radius: 999px; background: var(--red-100);
+}
+.msg-voice-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red-600); animation: msg-voice-pulse 1.2s infinite; flex-shrink: 0; }
+@keyframes msg-voice-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.msg-voice-rec-timer, #msg-voice-rec-timer { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--ink); font-size: 13.5px; }
+.msg-voice-rec-label { font-size: 12.5px; color: var(--ink-muted); flex: 1; }
+
+/* Attachment content inside a bubble */
+.msg-bubble.has-image { padding: 4px; background: transparent; }
+.msg-bubble-row:not(.is-mine) .msg-bubble.has-image { background: var(--surface-sunken); }
+.msg-bubble-img { display: block; max-width: 260px; max-height: 320px; width: 100%; height: auto; border-radius: 13px; cursor: pointer; object-fit: cover; }
+.msg-bubble.has-image .msg-bubble-text { padding: 8px 8px 4px; }
+
+.msg-file-card { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 180px; }
+.msg-file-icon {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.2);
+}
+.msg-bubble-row:not(.is-mine) .msg-file-icon { background: var(--surface); color: var(--red-600); }
+.msg-file-info { display: flex; flex-direction: column; min-width: 0; }
+.msg-file-name { font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-file-size { font-size: 11px; opacity: 0.75; margin-top: 1px; }
+
+.msg-voice-player { display: flex; align-items: center; gap: 8px; min-width: 200px; }
+.msg-voice-player audio { height: 36px; max-width: 220px; }
+.msg-voice-duration { font-size: 11px; opacity: 0.8; flex-shrink: 0; }
+@media (max-width: 480px) {
+  .msg-voice-player audio { max-width: 55vw; }
+}
 
 /* Below the app's mobile-chrome breakpoint (matches app-nav.js / the
    .mobile-tabbar switch in dashboard.css) there isn't room for the
@@ -190,7 +261,13 @@
   .msg-shell.show-thread .msg-inbox { display: none; }
   .msg-shell.show-thread .msg-thread { display: flex; }
   .msg-back-btn { display: inline-flex; align-items: center; }
+  /* Give the textarea + Send button more of the limited width back on
+     a phone-sized screen, now that there are 3 icon buttons ahead of
+     them instead of none. */
+  .msg-send-form { gap: 4px; padding: 10px 12px; }
+  .msg-attach-btn { width: 36px; height: 36px; }
+  .msg-attach-btn svg { width: 18px; height: 18px; }
 }
 @media (min-width: 860px) {
-  .msg-shell { grid-template-columns: 340px 1fr; }
+  .msg-shell { grid-template-columns: 340px minmax(0, 1fr); }
 }

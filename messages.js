@@ -13,6 +13,13 @@
   var inputEl = document.getElementById("msg-input");
   var msgShell = document.querySelector(".msg-shell");
   var backBtn = document.getElementById("msg-back-btn");
+  var imageInput = document.getElementById("msg-image-input");
+  var fileInput = document.getElementById("msg-file-input");
+  var voiceBtn = document.getElementById("msg-voice-btn");
+  var attachmentPreviewEl = document.getElementById("msg-attachment-preview");
+  var voiceRecorderEl = document.getElementById("msg-voice-recorder");
+  var voiceTimerEl = document.getElementById("msg-voice-rec-timer");
+  var sendBtn = document.getElementById("msg-send-btn");
   // Below this width the inbox list and the open thread can't fit side by
   // side (matches the @media (min-width: 860px) switch in messages.css),
   // so opening a thread there should replace the list view, not just
@@ -89,6 +96,18 @@
     if (secondsAgo < 3600) return "Active " + Math.max(1, Math.floor(secondsAgo / 60)) + "m ago";
     if (secondsAgo < 86400) return "Active " + Math.floor(secondsAgo / 3600) + "h ago";
     return "Active " + Math.floor(secondsAgo / 86400) + "d ago";
+  }
+
+  function fmtFileSize(bytes) {
+    if (!bytes) return "";
+    if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+  function fmtDuration(seconds) {
+    seconds = Math.round(seconds || 0);
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
   }
 
   var activeFilter = "all"; // "all" | "unread" | "starred"
@@ -237,6 +256,27 @@
   // out the <textarea> mid-edit.
   var editingMessageId = null;
 
+  function attachmentHtml(m) {
+    if (m.attachmentType === "image") {
+      return '<img src="' + H.escapeHtml(m.attachmentUrl) + '" alt="" class="msg-bubble-img" data-lightbox-img="' + H.escapeHtml(m.attachmentUrl) + '" />';
+    }
+    if (m.attachmentType === "voice") {
+      return (
+        '<div class="msg-voice-player">' +
+        '<audio controls preload="metadata" src="' + H.escapeHtml(m.attachmentUrl) + '"></audio>' +
+        (m.attachmentDuration ? '<span class="msg-voice-duration">' + H.escapeHtml(fmtDuration(m.attachmentDuration)) + "</span>" : "") +
+        "</div>"
+      );
+    }
+    return (
+      '<a class="msg-file-card" href="' + H.escapeHtml(m.attachmentUrl) + '" target="_blank" rel="noopener noreferrer" download="' + H.escapeHtml(m.attachmentName || "") + '">' +
+      '<span class="msg-file-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" /></svg></span>' +
+      '<span class="msg-file-info"><span class="msg-file-name">' + H.escapeHtml(m.attachmentName || "File") + "</span>" +
+      (m.attachmentSize ? '<span class="msg-file-size">' + H.escapeHtml(fmtFileSize(m.attachmentSize)) + "</span>" : "") + "</span>" +
+      "</a>"
+    );
+  }
+
   var currentMessages = [];
   function renderMessages(messages) {
     currentMessages = messages;
@@ -268,15 +308,21 @@
       var isLastMine = m.isMine && !messages.slice(i + 1).some(function (later) { return later.isMine; });
       var receipt = isLastMine ? '<span class="msg-bubble-receipt' + (m.isRead ? " is-read" : "") + '">' + (m.isRead ? "Read" : "Sent") + "</span>" : "";
       var edited = m.isEdited ? '<span class="msg-bubble-edited">(edited)</span>' : "";
-      var editBtn = m.isMine ? '<button type="button" class="msg-edit-btn" data-edit-msg="' + m.id + '" aria-label="Edit message">&#9998;</button>' : "";
+      // Editing is text-only — a photo/file/voice message has no text
+      // form to edit into, so the pencil only shows on plain text ones.
+      var editBtn = m.isMine && !m.attachmentType ? '<button type="button" class="msg-edit-btn" data-edit-msg="' + m.id + '" aria-label="Edit message">&#9998;</button>' : "";
       var meta = isLastInGroup ? '<div class="msg-bubble-time">' + edited + "<span>" + fmtTime(m.createdAt) + "</span>" + receipt + "</div>" : "";
+      var bubbleInner = (m.attachmentType ? attachmentHtml(m) : "") + (m.content ? '<div class="msg-bubble-text">' + linkifyHtml(m.content) + "</div>" : "");
       html +=
         '<div class="msg-bubble-row' + (m.isMine ? " is-mine" : "") + (isGroupStart ? " is-group-start" : " is-grouped") + '" data-msg-id="' + m.id + '">' +
         '<div class="msg-bubble-col">' +
-        '<div class="msg-bubble-wrap"><div class="msg-bubble">' + linkifyHtml(m.content) + "</div>" + editBtn + "</div>" +
+        '<div class="msg-bubble-wrap"><div class="msg-bubble' + (m.attachmentType ? " has-" + m.attachmentType : "") + '">' + bubbleInner + "</div>" + editBtn + "</div>" +
         meta + "</div></div>";
     }
     bodyEl.innerHTML = html;
+    bodyEl.querySelectorAll("[data-lightbox-img]").forEach(function (img) {
+      img.onclick = function () { H.openLightbox([{ type: "image", url: img.dataset.lightboxImg }], 0); };
+    });
     wireEditButtons();
   }
 
@@ -343,19 +389,161 @@
       .catch(function (err) { H.toast(err.message, true); });
   }
 
+  // ---------- Photo / file attachments ----------
+  // Matches the backend's own caps (MAX_PHOTO_BYTES / MAX_FILE_BYTES in
+  // api/auth.js) so an oversized pick is rejected immediately instead of
+  // uploading megabytes over mobile data just to get a 413 back.
+  var MAX_IMAGE_MB = 10;
+  var MAX_FILE_MB = 25;
+  var pendingAttachment = null; // { type: "image"|"file", blob, previewUrl, name }
+
+  function clearPendingAttachment() {
+    if (pendingAttachment && pendingAttachment.previewUrl) URL.revokeObjectURL(pendingAttachment.previewUrl);
+    pendingAttachment = null;
+    attachmentPreviewEl.hidden = true;
+    attachmentPreviewEl.innerHTML = "";
+    imageInput.value = "";
+    fileInput.value = "";
+  }
+  function renderAttachmentPreview() {
+    if (!pendingAttachment) { attachmentPreviewEl.hidden = true; return; }
+    attachmentPreviewEl.hidden = false;
+    attachmentPreviewEl.innerHTML =
+      (pendingAttachment.type === "image"
+        ? '<img src="' + pendingAttachment.previewUrl + '" alt="" class="msg-attachment-preview-img" />'
+        : '<span class="msg-attachment-preview-file"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21.44 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 014.95 4.95l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>' +
+          '<span>' + H.escapeHtml(pendingAttachment.name) + "</span></span>") +
+      '<button type="button" class="msg-attachment-remove" aria-label="Remove attachment">&times;</button>';
+    attachmentPreviewEl.querySelector(".msg-attachment-remove").addEventListener("click", clearPendingAttachment);
+  }
+  imageInput.addEventListener("change", function () {
+    var file = imageInput.files[0];
+    if (!file) return;
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) { H.toast("Image is too large. Keep it under " + MAX_IMAGE_MB + "MB.", true); imageInput.value = ""; return; }
+    H.compressImage(file, 1600, 0.82).then(function (compressed) {
+      if (pendingAttachment && pendingAttachment.previewUrl) URL.revokeObjectURL(pendingAttachment.previewUrl);
+      pendingAttachment = { type: "image", blob: compressed, previewUrl: URL.createObjectURL(compressed), name: file.name };
+      renderAttachmentPreview();
+      inputEl.focus();
+    });
+  });
+  fileInput.addEventListener("change", function () {
+    var file = fileInput.files[0];
+    if (!file) return;
+    if (file.size > MAX_FILE_MB * 1024 * 1024) { H.toast("File is too large. Keep it under " + MAX_FILE_MB + "MB.", true); fileInput.value = ""; return; }
+    pendingAttachment = { type: "file", blob: file, name: file.name };
+    renderAttachmentPreview();
+    inputEl.focus();
+  });
+  function uploadAttachment(att) {
+    var contentType = att.blob.type || (att.type === "image" ? "image/jpeg" : "application/octet-stream");
+    return H.api("upload-message-attachment", {
+      method: "POST",
+      query: att.name ? { filename: att.name } : {},
+      headers: { "Content-Type": contentType },
+      body: att.blob,
+    });
+  }
+
+  // ---------- Voice messages ----------
+  var mediaRecorder = null;
+  var recordedChunks = [];
+  var recordingStartedAt = 0;
+  var recordingTimerInterval = null;
+  var recordingStream = null;
+
+  function stopRecordingUi() {
+    clearInterval(recordingTimerInterval);
+    if (recordingStream) recordingStream.getTracks().forEach(function (t) { t.stop(); });
+    recordingStream = null;
+    voiceRecorderEl.hidden = true;
+    sendForm.hidden = false;
+  }
+  voiceBtn.addEventListener("click", function () {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
+      H.toast("Voice recording isn't supported on this browser.", true);
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(function (stream) {
+        recordingStream = stream;
+        recordedChunks = [];
+        var mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "";
+        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType: mimeType } : undefined);
+        mediaRecorder.ondataavailable = function (e) { if (e.data.size) recordedChunks.push(e.data); };
+        mediaRecorder.start();
+        recordingStartedAt = Date.now();
+        sendForm.hidden = true;
+        voiceRecorderEl.hidden = false;
+        voiceTimerEl.textContent = "0:00";
+        recordingTimerInterval = setInterval(function () {
+          voiceTimerEl.textContent = fmtDuration((Date.now() - recordingStartedAt) / 1000);
+        }, 500);
+      })
+      .catch(function () {
+        H.toast("Couldn't access your microphone — check this site's permission in your browser settings.", true);
+      });
+  });
+  document.getElementById("msg-voice-cancel").addEventListener("click", function () {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.onstop = null; // discard — don't send on cancel
+      mediaRecorder.stop();
+    }
+    stopRecordingUi();
+  });
+  document.getElementById("msg-voice-stop").addEventListener("click", function () {
+    if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+    var durationSec = (Date.now() - recordingStartedAt) / 1000;
+    var otherIdAtRecordTime = activeOtherId;
+    mediaRecorder.onstop = function () {
+      var mimeType = mediaRecorder.mimeType || "audio/webm";
+      var blob = new Blob(recordedChunks, { type: mimeType });
+      stopRecordingUi();
+      if (!otherIdAtRecordTime || blob.size < 500) return; // guards a near-instant accidental tap
+      var ext = mimeType.indexOf("mp4") !== -1 ? "m4a" : "webm";
+      H.api("upload-message-attachment", { method: "POST", query: { filename: "voice." + ext }, headers: { "Content-Type": mimeType }, body: blob })
+        .then(function (uploaded) {
+          return H.api("messages", {
+            method: "POST",
+            body: { recipientId: otherIdAtRecordTime, attachmentUrl: uploaded.url, attachmentType: "voice", attachmentSize: uploaded.size, attachmentDuration: durationSec },
+          });
+        })
+        .then(function () { loadThread(true); })
+        .catch(function (err) { H.toast(err.message, true); });
+    };
+    mediaRecorder.stop();
+  });
+
   sendForm.addEventListener("submit", function (e) {
     e.preventDefault();
+    if (!activeOtherId) return;
     var content = inputEl.value.trim();
-    if (!content || !activeOtherId) return;
+    if (!content && !pendingAttachment) return;
+    var attachment = pendingAttachment;
     inputEl.value = "";
+    clearPendingAttachment();
     lastTypingPingAt = 0; // next keystroke pings immediately instead of waiting out the 3s throttle
     setTypingIndicator(false);
-    H.api("messages", { method: "POST", body: { recipientId: activeOtherId, content: content } })
+    sendBtn.disabled = true;
+
+    (attachment ? uploadAttachment(attachment) : Promise.resolve(null))
+      .then(function (uploaded) {
+        var body = { recipientId: activeOtherId, content: content };
+        if (uploaded) {
+          body.attachmentUrl = uploaded.url;
+          body.attachmentType = uploaded.type;
+          body.attachmentName = uploaded.name;
+          body.attachmentSize = uploaded.size;
+        }
+        return H.api("messages", { method: "POST", body: body });
+      })
       .then(function () { loadThread(true); })
       .catch(function (err) {
         H.toast(err.message, true);
         inputEl.value = content;
-      });
+        if (attachment) { pendingAttachment = attachment; renderAttachmentPreview(); }
+      })
+      .finally(function () { sendBtn.disabled = false; });
   });
   inputEl.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
