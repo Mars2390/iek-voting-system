@@ -813,6 +813,134 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
+    // IEK CALENDAR — official events, admin-curated (AGMs, seminars,
+    // CPD sessions), broadcast to every member on creation.
+    // =========================================================
+    if (action === "events") {
+      if (req.method === "GET") {
+        // Both calendar.html (a member session) and the admin panel's
+        // event-management list (an admin session, entirely separate
+        // token/table) read this same listing — try the admin token
+        // silently first since only requireSession's failure path writes
+        // a response, then fall back to it for everyone else.
+        const token = getToken(req);
+        const [adminSess] = token
+          ? await sql`SELECT id FROM admin_sessions WHERE token = ${token} AND expires_at > NOW()`
+          : [];
+        if (!adminSess) {
+          const session = await requireSession(sql, req, res);
+          if (!session) return;
+        }
+        // Upcoming events soonest-first, then past events most-recent-first
+        // — two different sort directions depending which side of "now"
+        // an event falls on, so it's two CASE-guarded sort keys rather
+        // than one plain event_at ASC (which would bury next week's AGM
+        // under years of past events sorted oldest-first).
+        // event_at is a naive "wall clock" value (the admin's datetime-local
+        // input, meant as Nairobi local time, never converted through a JS
+        // Date) — TO_CHAR pulls it out as a plain string so it can't get
+        // silently reinterpreted in whatever timezone the reading process
+        // happens to be running in. A raw Date round-trip here would be a
+        // real bug, not just a cosmetic one: it was empirically confirmed
+        // to shift the displayed hour by Nairobi's UTC+3 offset depending
+        // on the server's local timezone, which is exactly wrong for an
+        // AGM start time.
+        const rows = await sql`
+          SELECT *, (event_at < NOW()) AS is_past, TO_CHAR(event_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS event_at_str
+          FROM events
+          ORDER BY (event_at < NOW()) ASC,
+                   (CASE WHEN event_at >= NOW() THEN event_at END) ASC,
+                   (CASE WHEN event_at < NOW() THEN event_at END) DESC
+          LIMIT 100
+        `;
+        return res.status(200).json({
+          events: rows.map((e) => ({
+            id: e.id,
+            title: e.title,
+            description: e.description,
+            location: e.location,
+            eventAt: e.event_at_str,
+            imageUrl: e.image_url,
+            registerUrl: e.register_url,
+            documentUrl: e.document_url,
+            isPast: e.is_past,
+            createdAt: e.created_at,
+          })),
+        });
+      }
+
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+
+      if (req.method === "POST") {
+        const b = req.body || {};
+        if (!b.title || !b.eventAt) {
+          return res.status(400).json({ error: "Title and date/time are required." });
+        }
+        const [row] = await sql`
+          WITH inserted AS (
+            INSERT INTO events (title, description, location, event_at, image_url, register_url, document_url, created_by_email)
+            VALUES (${b.title}, ${b.description || null}, ${b.location || null}, ${b.eventAt}, ${b.imageUrl || null}, ${b.registerUrl || null}, ${b.documentUrl || null}, ${admin.email})
+            RETURNING *
+          )
+          SELECT *, TO_CHAR(event_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS event_at_str FROM inserted
+        `;
+        // Broadcast to every member in one insert rather than one round
+        // trip per recipient — fine at this membership's scale, and
+        // avoids notify()'s per-row self-exclusion logic which assumes
+        // an engineer actor (this notification has none; actor_id stays
+        // NULL, which the notifications GET query LEFT JOINs around).
+        await sql`
+          INSERT INTO notifications (recipient_id, actor_id, type, target_type, target_id)
+          SELECT id, NULL, 'event', 'event', ${row.id} FROM engineers
+        `;
+        return res.status(201).json({
+          event: {
+            id: row.id,
+            title: row.title,
+            description: row.description,
+            location: row.location,
+            eventAt: row.event_at_str,
+            imageUrl: row.image_url,
+            registerUrl: row.register_url,
+            documentUrl: row.document_url,
+          },
+        });
+      }
+
+      if (req.method === "DELETE") {
+        const id = Number(req.query.id || (req.body || {}).id);
+        await sql`DELETE FROM notifications WHERE target_type = 'event' AND target_id = ${id}`;
+        await sql`DELETE FROM events WHERE id = ${id}`;
+        return res.status(200).json({ success: true });
+      }
+
+      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    if (action === "upload-event-image") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      const contentType = req.headers["content-type"] || "";
+      if (!contentType.startsWith("image/")) {
+        return res.status(400).json({ error: "Only image uploads are allowed." });
+      }
+      const body = await readRawBody(req);
+      if (!body.length) return res.status(400).json({ error: "No file data received." });
+      if (body.length > MAX_PHOTO_BYTES) {
+        return res.status(413).json({ error: `File is too large. Keep it under ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)}MB.` });
+      }
+      const ext = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "jpg";
+      const blob = await put(`event-images/${Date.now()}.${ext}`, body, { access: "public", contentType });
+      return res.status(200).json({ url: blob.url });
+    }
+
+    // =========================================================
     // FEED — posts, comments, likes, reposts
     // =========================================================
     if (action === "posts") {
@@ -1446,10 +1574,16 @@ export default async function handler(req, res) {
       if (!session) return;
 
       if (req.method === "GET") {
+        // actor_id is NULL for broadcast/system notifications (e.g. a new
+        // IEK Calendar event isn't "posted by" a fellow engineer) — LEFT
+        // JOIN so those rows survive instead of silently vanishing.
         const rows = await sql`
           SELECT n.id, n.type, n.target_type, n.target_id, n.is_read, n.created_at,
-                 a.id AS actor_id, a.display_name, a.name, a.profile_photo
-          FROM notifications n JOIN engineers a ON a.id = n.actor_id
+                 a.id AS actor_id, a.display_name, a.name, a.profile_photo,
+                 ev.title AS event_title
+          FROM notifications n
+          LEFT JOIN engineers a ON a.id = n.actor_id
+          LEFT JOIN events ev ON ev.id = n.target_id AND n.target_type = 'event'
           WHERE n.recipient_id = ${session.id}
           ORDER BY n.created_at DESC
           LIMIT 100
@@ -1480,6 +1614,23 @@ export default async function handler(req, res) {
 
         const notifications = order.map((key) => {
           const g = groups.get(key);
+          // Broadcast/system notifications (no actor engineer) get their
+          // own text built from the event itself, not the "X and Y did
+          // something" actor-name template the rest of these use.
+          if (g.type === "event") {
+            return {
+              id: g.id,
+              type: g.type,
+              targetType: g.target_type,
+              targetId: g.target_id,
+              isRead: g.isReadAll,
+              createdAt: g.latestCreatedAt,
+              actorId: null,
+              actorPhoto: null,
+              count: 1,
+              text: "New IEK Calendar event: " + (g.event_title || "View details"),
+            };
+          }
           const names = g.actorNames;
           let who;
           if (names.length === 1) who = names[0];

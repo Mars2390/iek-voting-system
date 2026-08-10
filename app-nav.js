@@ -171,12 +171,18 @@
   // Notifications bell — badge polls in the background; the list itself
   // is only fetched when the panel is opened, not on every poll tick.
   function notifUrl(n) {
+    if (n.targetType === "event") return "/calendar.html#event-" + n.targetId;
     if (n.targetType === "post") return "/profile.html#post-" + n.targetId;
     if (n.type === "connection_request") return "/connections.html";
     if (n.targetType === "profile") return "/profile.html?id=" + n.actorId;
     if (n.targetType === "conversation") return "/messages.html?with=" + n.actorId;
     return "#";
   }
+
+  var CALENDAR_NOTIF_ICON =
+    '<span class="hub-avatar sz-sm nav-notif-icon" aria-hidden="true">' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg></span>';
 
   function refreshNotifBadge() {
     if (!token) return;
@@ -211,7 +217,7 @@
           .map(function (n) {
             return (
               '<a href="' + notifUrl(n) + '" class="nav-notif-item' + (n.isRead ? "" : " is-unread") + '" data-type="' + n.type + '" data-target-type="' + n.targetType + '" data-target-id="' + n.targetId + '">' +
-              H.avatarHtml({ displayName: "", profilePhoto: n.actorPhoto }, "sm") +
+              (n.type === "event" ? CALENDAR_NOTIF_ICON : H.avatarHtml({ displayName: "", profilePhoto: n.actorPhoto }, "sm")) +
               '<span class="body"><span class="text">' + H.escapeHtml(n.text) + "</span><time>" + H.timeAgo(n.createdAt) + "</time></span>" +
               (n.isRead ? "" : '<span class="dot"></span>') +
               "</a>"

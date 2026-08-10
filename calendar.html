@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" href="/favicon.ico" sizes="48x48" />
+<link rel="icon" href="/images/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/images/icon-180.png" />
+<link rel="manifest" href="/site.webmanifest" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>IEK Calendar — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="calendar.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active=""></div>
+
+<section class="hub-banner">
+  <img src="images/landing/optimized/pexels-e-g-439660199-29155807.jpg" alt="" />
+  <div class="hub-banner-inner">
+    <span class="eh-eyebrow">Institution of Engineers of Kenya</span>
+    <h1>IEK Calendar</h1>
+    <p>AGMs, CPD seminars, and chapter events — official notices from IEK, in one place.</p>
+  </div>
+</section>
+
+<main class="hub-main">
+  <div class="hub-tabs">
+    <button class="hub-tab is-active" data-caltab="upcoming">Upcoming</button>
+    <button class="hub-tab" data-caltab="past">Past events</button>
+  </div>
+
+  <div id="cal-upcoming-panel"></div>
+  <div id="cal-past-panel" hidden></div>
+</main>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="calendar.js"></script>
+</body>
+</html>

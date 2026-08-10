@@ -46,4 +46,30 @@
     .catch(function (err) {
       document.getElementById("db-loading").textContent = err.message || "Couldn't load your dashboard.";
     });
+
+  var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  // eventAt is a plain "YYYY-MM-DDTHH:MM:SS" wall-clock string with no
+  // timezone — parsed by regex, not new Date(), same reasoning as calendar.js.
+  function fmtEventDateTime(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(s || ""));
+    if (!m) return "";
+    var month = Number(m[2]), day = Number(m[3]), hour = Number(m[4]), minute = m[5];
+    var ampm = hour >= 12 ? "PM" : "AM";
+    var h12 = hour % 12 || 12;
+    return day + " " + MONTHS[month - 1] + " · " + h12 + ":" + minute + " " + ampm;
+  }
+
+  H.api("events")
+    .then(function (data) {
+      var next = data.events.find(function (e) { return !e.isPast; });
+      if (!next) return;
+      var card = document.getElementById("db-event-card");
+      var teaser = document.getElementById("db-event-teaser");
+      var img = next.imageUrl
+        ? '<span class="cal-teaser-img"><img src="' + H.escapeHtml(next.imageUrl) + '" alt="" /></span>'
+        : '<span class="cal-teaser-img hub-avatar sz-md" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg></span>';
+      teaser.innerHTML = img + '<span class="cal-teaser-body"><h4>' + H.escapeHtml(next.title) + "</h4><p>" + H.escapeHtml(fmtEventDateTime(next.eventAt)) + "</p></span>";
+      card.hidden = false;
+    })
+    .catch(function () {});
 })();

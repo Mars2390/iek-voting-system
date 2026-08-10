@@ -242,6 +242,98 @@
       });
   });
 
+  // ---------- IEK Calendar events ----------
+  var eventForm = document.getElementById("ad-event-form");
+  var eventError = document.getElementById("ad-event-error");
+  var eventImageInput = document.getElementById("ad-event-image-input");
+  var eventImageLabel = document.getElementById("ad-event-image-label");
+  var eventListEl = document.getElementById("ad-event-list");
+  var pendingEventImage = null;
+
+  eventImageInput.addEventListener("change", function () {
+    pendingEventImage = eventImageInput.files[0] || null;
+    eventImageLabel.textContent = pendingEventImage ? pendingEventImage.name : "Add event image (optional)…";
+  });
+
+  var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  // eventAt is a plain wall-clock string with no timezone marker — see
+  // the matching comment in api/auth.js and calendar.js. Never new Date().
+  function fmtEventDateTime(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(s || ""));
+    if (!m) return "";
+    var month = Number(m[2]), day = Number(m[3]), hour = Number(m[4]), minute = m[5];
+    var ampm = hour >= 12 ? "PM" : "AM";
+    var h12 = hour % 12 || 12;
+    return day + " " + MONTHS[month - 1] + " " + m[1] + " · " + h12 + ":" + minute + " " + ampm;
+  }
+
+  function loadEvents() {
+    adminApi("events").then(function (d) {
+      eventListEl.innerHTML = d.events.length
+        ? d.events
+            .map(function (ev) {
+              return (
+                '<div class="hub-feed-item">' +
+                "<div><p><strong>" + escapeHtml(ev.title) + "</strong>" + (ev.isPast ? " — past" : "") + "</p>" +
+                "<time>" + escapeHtml(fmtEventDateTime(ev.eventAt)) + (ev.location ? " · " + escapeHtml(ev.location) : "") + "</time></div>" +
+                '<button type="button" class="ad-edit-btn" data-delete-event="' + ev.id + '" style="margin-left:auto;">Delete</button>' +
+                "</div>"
+              );
+            })
+            .join("")
+        : '<div class="hub-empty">No events posted yet.</div>';
+      eventListEl.querySelectorAll("[data-delete-event]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          if (!window.confirm("Delete this event? Members will no longer see it.")) return;
+          adminApi("events", { method: "DELETE", query: { id: btn.dataset.deleteEvent } })
+            .then(function () { toast("Event deleted"); loadEvents(); })
+            .catch(function (err) { toast(err.message, true); });
+        });
+      });
+    });
+  }
+
+  eventForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    eventError.hidden = true;
+    var submitBtn = eventForm.querySelector("button[type=submit]");
+    var originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Posting…";
+
+    var payload = {
+      title: document.getElementById("ad-event-title").value.trim(),
+      description: document.getElementById("ad-event-description").value.trim(),
+      location: document.getElementById("ad-event-location").value.trim(),
+      eventAt: document.getElementById("ad-event-datetime").value,
+      registerUrl: document.getElementById("ad-event-register").value.trim(),
+      documentUrl: document.getElementById("ad-event-document").value.trim(),
+    };
+
+    var uploadStep = pendingEventImage
+      ? adminApi("upload-event-image", { method: "POST", headers: { "Content-Type": pendingEventImage.type || "image/jpeg" }, body: pendingEventImage }).then(function (d) { payload.imageUrl = d.url; })
+      : Promise.resolve();
+
+    uploadStep
+      .then(function () { return adminApi("events", { method: "POST", body: payload }); })
+      .then(function () {
+        toast("Event posted — every member has been notified");
+        eventForm.reset();
+        pendingEventImage = null;
+        eventImageLabel.textContent = "Add event image (optional)…";
+        loadEvents();
+      })
+      .catch(function (err) {
+        eventError.textContent = err.message;
+        eventError.hidden = false;
+      })
+      .finally(function () {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+      });
+  });
+
   loadStats();
   loadEngineers(true);
+  loadEvents();
 })();

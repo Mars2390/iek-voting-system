@@ -63,7 +63,10 @@ body { background: var(--bg); }
 .ad-edit-form { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 4px; }
 .ad-edit-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 
+.pf-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
 @media (max-width: 640px) {
   .ad-nav-tag { display: none; }
   .ad-table th:nth-child(5), .ad-table td:nth-child(5) { display: none; }
+  .pf-form-row { grid-template-columns: 1fr; }
 }

@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="dashboard.css" />
 <link rel="stylesheet" href="hub.css" />
 <link rel="stylesheet" href="feed-shared.css" />
+<link rel="stylesheet" href="calendar.css" />
 </head>
 <body>
 
@@ -101,7 +102,16 @@
             <a href="/profile.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Edit profile</a>
             <a href="/directory.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Find engineers</a>
             <a href="/jobs.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">Browse jobs</a>
+            <a href="/calendar.html" class="eh-btn eh-btn-ghost-light hub-btn-sm">IEK Calendar</a>
           </div>
+        </section>
+
+        <section id="db-event-card" class="hub-card" style="margin-bottom:20px;" hidden>
+          <div class="pf-section-head">
+            <h2 class="db-section-h" style="margin:0;">Next IEK event</h2>
+            <a href="/calendar.html" class="pf-edit-link">See all</a>
+          </div>
+          <a id="db-event-teaser" class="cal-teaser" href="/calendar.html"></a>
         </section>
 
         <section class="hub-card" style="margin-bottom:20px;">
