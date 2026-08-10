@@ -1,7 +1,11 @@
-// "Posts" section on a profile page — the author's own post history,
-// pinned post first. Shares rendering/reactions/menu with the Home feed
-// via post-shared.js (window.HubPosts); this file only owns fetching the
-// right author's posts and paging them.
+// "Posts" section on a profile page — a bounded preview of the author's
+// most recent posts (pinned post first), rendered as a horizontally
+// scrolling row like LinkedIn's profile Activity section instead of an
+// endless vertical stack. "Show all" links out to profile-all-posts.html,
+// which reuses the same post-shared.js rendering for the full,
+// infinite-scrolling list. Shares rendering/reactions/menu with the Home
+// feed via post-shared.js (window.HubPosts); this file only owns
+// fetching the right author's preview posts.
 (function () {
   "use strict";
   var section = document.getElementById("pf-posts-section");
@@ -14,50 +18,50 @@
   var viewId = params.get("id"); // null => self
 
   var listEl = document.getElementById("pf-posts-list");
-  var loadMoreBtn = document.getElementById("pf-posts-loadmore");
-  var LIMIT = 10;
-  var offset = 0;
-  var authorId = null;
-  var isSelf = false;
+  var prevBtn = document.getElementById("pf-posts-prev");
+  var nextBtn = document.getElementById("pf-posts-next");
+  var showAllLink = document.getElementById("pf-posts-showall");
+  var PREVIEW_LIMIT = 6;
 
-  var isLoadingPosts = false;
-  function loadPosts(reset) {
-    if (isLoadingPosts) return;
-    isLoadingPosts = true;
-    if (reset) offset = 0;
-    H.api("posts", { query: { authorId: authorId, limit: LIMIT, offset: offset } })
+  function updateNavVisibility() {
+    var canScroll = listEl.scrollWidth > listEl.clientWidth + 4;
+    prevBtn.hidden = !canScroll;
+    nextBtn.hidden = !canScroll;
+  }
+
+  function scrollByCard(dir) {
+    var card = listEl.querySelector(".feed-post-card");
+    var amount = card ? card.getBoundingClientRect().width + 14 : 300;
+    listEl.scrollBy({ left: dir * amount, behavior: "smooth" });
+  }
+  prevBtn.addEventListener("click", function () { scrollByCard(-1); });
+  nextBtn.addEventListener("click", function () { scrollByCard(1); });
+  listEl.addEventListener("scroll", updateNavVisibility);
+  window.addEventListener("resize", updateNavVisibility);
+
+  function loadPreview(authorId) {
+    H.api("posts", { query: { authorId: authorId, limit: PREVIEW_LIMIT, offset: 0 } })
       .then(function (data) {
-        if (reset) listEl.innerHTML = "";
-        if (!data.posts.length && reset) {
-          if (!isSelf) { section.hidden = true; return; }
+        if (!data.posts.length) {
+          if (authorId !== window.__pfSelfId) { section.hidden = true; return; }
           section.hidden = false;
+          showAllLink.hidden = true;
           listEl.innerHTML = '<div class="hub-empty" style="padding:16px 0;">You haven\'t posted anything yet. Share an update from Home.</div>';
-          loadMoreBtn.hidden = true;
           return;
         }
         section.hidden = false;
-        listEl.insertAdjacentHTML("beforeend", data.posts.map(HP.postCard).join(""));
-        offset += data.posts.length;
-        loadMoreBtn.hidden = data.posts.length < LIMIT;
-        HP.wireContainer(listEl, function () { loadPosts(true); });
+        listEl.innerHTML = data.posts.map(HP.postCard).join("");
+        HP.wireContainer(listEl, function () { loadPreview(authorId); });
+        updateNavVisibility();
       })
-      .catch(function () { section.hidden = true; })
-      .finally(function () { isLoadingPosts = false; });
-  }
-  loadMoreBtn.addEventListener("click", function () { loadPosts(false); });
-  if (window.IntersectionObserver) {
-    new IntersectionObserver(
-      function (entries) {
-        if (entries[0].isIntersecting && !loadMoreBtn.hidden) loadPosts(false);
-      },
-      { rootMargin: "600px" }
-    ).observe(loadMoreBtn);
+      .catch(function () { section.hidden = true; });
   }
 
   H.api("me").then(function (d) {
     var selfId = d.engineer.id;
-    authorId = viewId ? Number(viewId) : selfId;
-    isSelf = authorId === selfId;
-    loadPosts(true);
+    window.__pfSelfId = selfId;
+    var authorId = viewId ? Number(viewId) : selfId;
+    showAllLink.href = "/profile-all-posts.html" + (viewId ? "?id=" + authorId : "");
+    loadPreview(authorId);
   });
 })();

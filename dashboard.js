@@ -8,6 +8,18 @@
       document.getElementById("db-welcome").textContent = "Welcome back, " + data.engineer.displayName + "!";
       document.getElementById("db-stat-completion").textContent = data.profileCompletion + "%";
       document.getElementById("db-progress-bar").style.width = data.profileCompletion + "%";
+
+      var hintEl = document.getElementById("db-completion-hint");
+      var missing = data.profileMissing || [];
+      if (!missing.length) {
+        hintEl.textContent = "✓ Your profile is complete";
+        hintEl.classList.add("is-done");
+      } else {
+        var shown = missing.slice(0, 2).map(function (m) { return m.label; });
+        var rest = missing.length - shown.length;
+        hintEl.textContent = shown.join(" · ") + (rest > 0 ? " +" + rest + " more" : "");
+      }
+
       document.getElementById("db-stat-connections").textContent = data.connectionsCount;
       document.getElementById("db-stat-pending").textContent = data.pendingRequestsCount;
 

@@ -175,10 +175,20 @@
   function renderNudges() {
     var wrap = document.getElementById("pf-nudges");
     if (!state.isSelf) { wrap.hidden = true; return; }
+    // Mirrors computeProfileCompletion in api/auth.js field-for-field —
+    // that function scores 10 fields into the dashboard's percentage, but
+    // used to be checked against a shorter 6-item list here, so the % and
+    // the visible "what's missing" list silently disagreed (company,
+    // location, discipline, and years of experience counted toward the
+    // score with nothing telling the member to go fill them in).
     var e = state.engineer;
     var checks = [
       [!e.bio, "Write a short bio", "#pf-about-edit-btn"],
       [!e.title, "Add your job title", "#pf-details-edit-btn"],
+      [!e.company, "Add your company", "#pf-details-edit-btn"],
+      [!e.location, "Add your location", "#pf-details-edit-btn"],
+      [!e.discipline, "Add your engineering discipline", "#pf-details-edit-btn"],
+      [!e.experienceYears, "Add your years of experience", "#pf-details-edit-btn"],
       [!e.profilePhoto, "Add a profile photo", "#pf-avatar-edit"],
       [!state.experience.length, "Add your work experience", "#pf-exp-add-btn"],
       [!state.education.length, "Add your education", "#pf-edu-add-btn"],
@@ -444,14 +454,16 @@
   });
 
   function deleteEntry(action, id) {
-    if (!window.confirm("Remove this entry?")) return;
-    H.api(action, { method: "DELETE", query: { id: id } })
-      .then(function () { return H.api(action, { query: { engineerId: state.engineer.id } }); })
-      .then(function (data) {
-        if (action === "work-experience") { state.experience = data.experience; renderExperience(); }
-        else { state.education = data.education; renderEducation(); }
-      })
-      .catch(function (err) { H.toast(err.message, true); });
+    H.confirm({ message: "This entry will be removed from your profile." }).then(function (ok) {
+      if (!ok) return;
+      H.api(action, { method: "DELETE", query: { id: id } })
+        .then(function () { return H.api(action, { query: { engineerId: state.engineer.id } }); })
+        .then(function (data) {
+          if (action === "work-experience") { state.experience = data.experience; renderExperience(); }
+          else { state.education = data.education; renderEducation(); }
+        })
+        .catch(function (err) { H.toast(err.message, true); });
+    });
   }
 
   // ---------- Skills ----------

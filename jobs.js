@@ -87,11 +87,13 @@
   function wireRemove(scope) {
     scope.querySelectorAll("[data-remove]").forEach(function (b) {
       b.addEventListener("click", function () {
-        if (!window.confirm("Remove this job posting?")) return;
-        H.api("jobs", { method: "DELETE", query: { id: b.dataset.remove } }).then(function () {
-          if (currentTab === "mine") loadMine();
-          else load();
-        }).catch(function (err) { H.toast(err.message, true); });
+        H.confirm({ message: "This removes it from the jobs board for everyone." }).then(function (ok) {
+          if (!ok) return;
+          H.api("jobs", { method: "DELETE", query: { id: b.dataset.remove } }).then(function () {
+            if (currentTab === "mine") loadMine();
+            else load();
+          }).catch(function (err) { H.toast(err.message, true); });
+        });
       });
     });
   }

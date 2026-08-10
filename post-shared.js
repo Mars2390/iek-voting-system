@@ -276,8 +276,10 @@ window.HubPosts = (function () {
     });
     containerEl.querySelectorAll("[data-delete]").forEach(function (btn) {
       btn.onclick = function () {
-        if (!window.confirm("Delete this post?")) return;
-        H.api("posts", { method: "DELETE", query: { id: btn.dataset.delete } }).then(function () { if (reloadFn) reloadFn(); });
+        H.confirm({ message: "This can't be undone." }).then(function (ok) {
+          if (!ok) return;
+          H.api("posts", { method: "DELETE", query: { id: btn.dataset.delete } }).then(function () { if (reloadFn) reloadFn(); });
+        });
       };
     });
     containerEl.querySelectorAll("[data-pin]").forEach(function (btn) {

@@ -68,10 +68,12 @@
       <section class="hub-card pf-section" id="pf-posts-section" hidden>
         <div class="pf-section-head">
           <h2>Posts</h2>
+          <a id="pf-posts-showall" class="pf-edit-link" href="#">Show all</a>
         </div>
-        <div id="pf-posts-list" class="feed-posts"></div>
-        <div style="text-align:center;margin-top:14px;">
-          <button id="pf-posts-loadmore" class="eh-btn eh-btn-ghost-light hub-btn-sm" hidden>Load more</button>
+        <div class="pf-posts-carousel-wrap">
+          <button type="button" id="pf-posts-prev" class="pf-posts-nav prev" aria-label="Previous" hidden>&#10094;</button>
+          <div id="pf-posts-list" class="pf-posts-carousel"></div>
+          <button type="button" id="pf-posts-next" class="pf-posts-nav next" aria-label="Next" hidden>&#10095;</button>
         </div>
       </section>
 

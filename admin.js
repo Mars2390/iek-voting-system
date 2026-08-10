@@ -284,10 +284,12 @@
         : '<div class="hub-empty">No events posted yet.</div>';
       eventListEl.querySelectorAll("[data-delete-event]").forEach(function (btn) {
         btn.addEventListener("click", function () {
-          if (!window.confirm("Delete this event? Members will no longer see it.")) return;
-          adminApi("events", { method: "DELETE", query: { id: btn.dataset.deleteEvent } })
-            .then(function () { toast("Event deleted"); loadEvents(); })
-            .catch(function (err) { toast(err.message, true); });
+          window.Hub.confirm({ message: "Members will no longer see it, and the notification about it will be removed too." }).then(function (ok) {
+            if (!ok) return;
+            adminApi("events", { method: "DELETE", query: { id: btn.dataset.deleteEvent } })
+              .then(function () { toast("Event deleted"); loadEvents(); })
+              .catch(function (err) { toast(err.message, true); });
+          });
         });
       });
     });

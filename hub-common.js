@@ -236,6 +236,64 @@ window.Hub = (function () {
     true
   );
 
+  // Custom "are you sure?" dialog — replaces window.confirm everywhere in
+  // Engineer Hub so warnings look and feel like the rest of the app
+  // instead of a raw browser prompt. Accepts either a plain message
+  // string or { title, message, confirmText, cancelText, danger } for
+  // more control; danger:true (the default — most confirms here guard a
+  // delete) styles the confirm button as a destructive red action.
+  // Resolves true/false, mirroring window.confirm's boolean return so
+  // every call site could drop this in with `H.confirm(...).then(...)`.
+  function confirmDialog(opts) {
+    if (typeof opts === "string") opts = { message: opts };
+    opts = opts || {};
+    var danger = opts.danger !== false;
+    var title = opts.title || (danger ? "Are you sure?" : "Confirm");
+    var confirmText = opts.confirmText || (danger ? "Delete" : "Confirm");
+    var cancelText = opts.cancelText || "Cancel";
+
+    return new Promise(function (resolve) {
+      var overlay = document.createElement("div");
+      overlay.className = "hub-modal-overlay hub-confirm-overlay";
+      overlay.innerHTML =
+        '<div class="hub-confirm" role="alertdialog" aria-modal="true">' +
+        '<span class="hub-confirm-icon' + (danger ? " is-danger" : "") + '">' +
+        (danger
+          ? '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>'
+          : '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.5 12.5l1.8 1.8L15 10.5" /></svg>') +
+        "</span>" +
+        '<h3 class="hub-confirm-title"></h3>' +
+        '<p class="hub-confirm-message"></p>' +
+        '<div class="hub-confirm-actions">' +
+        '<button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm hub-confirm-cancel"></button>' +
+        '<button type="button" class="eh-btn hub-btn-sm hub-confirm-ok' + (danger ? " eh-btn-danger" : " eh-btn-primary") + '"></button>' +
+        "</div></div>";
+      overlay.querySelector(".hub-confirm-title").textContent = title;
+      overlay.querySelector(".hub-confirm-message").textContent = opts.message || "";
+      overlay.querySelector(".hub-confirm-cancel").textContent = cancelText;
+      overlay.querySelector(".hub-confirm-ok").textContent = confirmText;
+      document.body.appendChild(overlay);
+      var prevScroll = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+
+      function finish(result) {
+        document.body.style.overflow = prevScroll;
+        document.removeEventListener("keydown", onKey);
+        overlay.remove();
+        resolve(result);
+      }
+      function onKey(e) {
+        if (e.key === "Escape") finish(false);
+        else if (e.key === "Enter") finish(true);
+      }
+      document.addEventListener("keydown", onKey);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) finish(false); });
+      overlay.querySelector(".hub-confirm-cancel").addEventListener("click", function () { finish(false); });
+      overlay.querySelector(".hub-confirm-ok").addEventListener("click", function () { finish(true); });
+      overlay.querySelector(".hub-confirm-ok").focus();
+    });
+  }
+
   function toast(message, isError) {
     var el = document.createElement("div");
     el.textContent = message;
@@ -252,5 +310,5 @@ window.Hub = (function () {
     }, 2600);
   }
 
-  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox };
+  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox, confirm: confirmDialog };
 })();

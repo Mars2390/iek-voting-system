@@ -17,10 +17,12 @@
   });
 
   document.getElementById("settings-logout-all").addEventListener("click", function () {
-    if (!window.confirm("This will sign you out everywhere, including this device. Continue?")) return;
-    H.api("logout-all", { method: "POST" }).finally(function () {
-      localStorage.removeItem("eh_session_token");
-      window.location.href = "/login.html";
+    H.confirm({ title: "Sign out everywhere?", message: "This signs you out on every device, including this one.", confirmText: "Sign out everywhere" }).then(function (ok) {
+      if (!ok) return;
+      H.api("logout-all", { method: "POST" }).finally(function () {
+        localStorage.removeItem("eh_session_token");
+        window.location.href = "/login.html";
+      });
     });
   });
 })();

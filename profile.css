@@ -78,6 +78,34 @@
 .pf-edit-link { font-size: 13px; font-weight: 700; color: var(--red-600); background: none; border: none; cursor: pointer; }
 .pf-edit-link:hover { color: var(--red-500); }
 
+/* Posts preview — LinkedIn's profile Activity section shows a bounded,
+   horizontally-scrolling row instead of every post stacked vertically
+   (which turns unusable once someone has 15-20 posts); "Show all" links
+   out to profile-all-posts.html for the real infinite-scroll list. */
+.pf-posts-carousel-wrap { position: relative; }
+.pf-posts-carousel {
+  display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x proximity;
+  scroll-behavior: smooth; padding-bottom: 6px; -webkit-overflow-scrolling: touch;
+}
+.pf-posts-carousel::-webkit-scrollbar { height: 6px; }
+.pf-posts-carousel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.pf-posts-carousel > .feed-post-card {
+  flex: 0 0 300px; scroll-snap-align: start; max-height: 420px; overflow-y: auto;
+}
+.pf-posts-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--surface); color: var(--ink); cursor: pointer; font-size: 13px;
+  box-shadow: var(--shadow-md); display: flex; align-items: center; justify-content: center;
+}
+.pf-posts-nav:hover { background: var(--surface-sunken); }
+.pf-posts-nav.prev { left: -14px; }
+.pf-posts-nav.next { right: -14px; }
+@media (max-width: 640px) {
+  .pf-posts-carousel > .feed-post-card { flex-basis: 82vw; }
+  .pf-posts-nav { display: none !important; }
+}
+
 .pf-bio { font-size: 14px; color: var(--ink); line-height: 1.65; white-space: pre-line; margin: 0; }
 .pf-bio.is-empty { color: var(--ink-muted); font-style: italic; }
 

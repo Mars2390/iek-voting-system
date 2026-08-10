@@ -204,21 +204,31 @@ async function notify(sql, recipientId, actorId, type, targetType, targetId) {
   `.catch(() => {});
 }
 
+// Single source of truth for both the dashboard's completion percentage
+// and its "here's what's missing" list — profile.js's own nudges
+// checklist used to check a different, shorter set of fields than this
+// function scored, so the percentage and the visible checklist silently
+// disagreed (e.g. company/location/discipline counted toward the score
+// with nothing telling the member to fill them in). One list now drives
+// both, with a jump-to anchor for anything editable from the profile page.
 function computeProfileCompletion(e, counts) {
   const checks = [
-    !!e.bio,
-    !!e.title,
-    !!e.company,
-    !!e.location,
-    !!e.discipline,
-    !!e.experience_years,
-    !!e.profile_photo,
-    counts.experience > 0,
-    counts.education > 0,
-    counts.skills > 0,
+    { done: !!e.bio, label: "Write a short bio", anchor: "#pf-about-edit-btn" },
+    { done: !!e.title, label: "Add your job title", anchor: "#pf-details-edit-btn" },
+    { done: !!e.company, label: "Add your company", anchor: "#pf-details-edit-btn" },
+    { done: !!e.location, label: "Add your location", anchor: "#pf-details-edit-btn" },
+    { done: !!e.discipline, label: "Add your engineering discipline", anchor: "#pf-details-edit-btn" },
+    { done: !!e.experience_years, label: "Add your years of experience", anchor: "#pf-details-edit-btn" },
+    { done: !!e.profile_photo, label: "Add a profile photo", anchor: "#pf-avatar-edit" },
+    { done: counts.experience > 0, label: "Add your work experience", anchor: "#pf-exp-add-btn" },
+    { done: counts.education > 0, label: "Add your education", anchor: "#pf-edu-add-btn" },
+    { done: counts.skills > 0, label: "Add at least one skill", anchor: null },
   ];
-  const done = checks.filter(Boolean).length;
-  return Math.round((done / checks.length) * 100);
+  const done = checks.filter((c) => c.done).length;
+  return {
+    percent: Math.round((done / checks.length) * 100),
+    missing: checks.filter((c) => !c.done).map((c) => ({ label: c.label, anchor: c.anchor })),
+  };
 }
 
 export default async function handler(req, res) {
@@ -1714,7 +1724,8 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         engineer: privateEngineer(session),
-        profileCompletion: completion,
+        profileCompletion: completion.percent,
+        profileMissing: completion.missing,
         connectionsCount: Number(connCount[0].count),
         pendingRequestsCount: Number(pendingCount[0].count),
         suggestions: suggestions.map((s) => ({
