@@ -23,6 +23,15 @@
       document.getElementById("db-stat-connections").textContent = data.connectionsCount;
       document.getElementById("db-stat-pending").textContent = data.pendingRequestsCount;
 
+      var e = data.engineer;
+      if (e.coverPhoto) document.getElementById("db-profile-cover").style.backgroundImage = "url('" + e.coverPhoto.replace(/'/g, "%27") + "')";
+      document.getElementById("db-profile-avatar").outerHTML = H.avatarHtml(e, "lg").replace('class="hub-avatar', 'id="db-profile-avatar" class="hub-avatar');
+      document.getElementById("db-profile-name").textContent = e.displayName;
+      document.getElementById("db-profile-role").textContent = [e.title, e.company].filter(Boolean).join(" at ") || e.discipline || "";
+      document.getElementById("db-profile-location").textContent = e.location || "";
+      document.getElementById("db-profile-views-num").textContent = data.profileViewsCount;
+      document.getElementById("db-profile-views-plural").textContent = data.profileViewsCount === 1 ? "" : "s";
+
       var activityEl = document.getElementById("db-activity");
       activityEl.innerHTML = data.recentActivity.length
         ? data.recentActivity

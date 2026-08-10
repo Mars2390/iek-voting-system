@@ -106,8 +106,16 @@ async function requireSession(sql, req, res) {
     res.status(401).json({ error: "Your session has expired. Please log in again." });
     return null;
   }
-  sql`UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ${session.session_id}`.catch(() => {});
-  sql`UPDATE engineers SET last_active = CURRENT_TIMESTAMP WHERE id = ${session.id}`.catch(() => {});
+  // Awaited (concurrently, so it costs one round trip rather than two)
+  // rather than fire-and-forget — this runs on every authenticated
+  // request, so an unawaited write here is the same "serverless function
+  // can be torn down before its own pending write completes" bug found
+  // and fixed for profile views, just far more consequential since it
+  // backs "active now"/"last active Xm ago" everywhere in the app.
+  await Promise.all([
+    sql`UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ${session.session_id}`.catch(() => {}),
+    sql`UPDATE engineers SET last_active = CURRENT_TIMESTAMP WHERE id = ${session.id}`.catch(() => {}),
+  ]);
   return session;
 }
 
@@ -1244,9 +1252,14 @@ export default async function handler(req, res) {
 
       // A view only counts when someone else looks at your profile —
       // upsert so re-visiting bumps the timestamp instead of piling up
-      // duplicate rows for "who viewed your profile".
+      // duplicate rows for "who viewed your profile". Awaited rather than
+      // fire-and-forget: a serverless function can be frozen/torn down
+      // right after its response is sent, which would silently drop an
+      // unawaited write before its own HTTP round-trip to the database
+      // ever completed — confirmed empirically (a real second-engineer
+      // view never showed up in the count without this await).
       if (!isSelf) {
-        sql`
+        await sql`
           INSERT INTO profile_views (viewer_id, viewed_id) VALUES (${session.id}, ${id})
           ON CONFLICT (viewer_id, viewed_id) DO UPDATE SET created_at = CURRENT_TIMESTAMP
         `.catch(() => {});
@@ -1476,7 +1489,11 @@ export default async function handler(req, res) {
           SELECT id, sender_id, content, is_read, created_at, edited_at FROM messages
           WHERE conversation_id = ${conv.id} ORDER BY created_at ASC LIMIT 200
         `;
-        sql`UPDATE messages SET is_read = TRUE WHERE conversation_id = ${conv.id} AND sender_id != ${session.id} AND is_read = FALSE`.catch(() => {});
+        // Awaited for the same reason as the profile-view and last-active
+        // writes above — an unawaited write in a serverless function isn't
+        // guaranteed to finish before the function is torn down, which
+        // would silently undermine the read-receipt feature.
+        await sql`UPDATE messages SET is_read = TRUE WHERE conversation_id = ${conv.id} AND sender_id != ${session.id} AND is_read = FALSE`.catch(() => {});
 
         return res.status(200).json({
           conversationId: conv.id,
@@ -1692,12 +1709,13 @@ export default async function handler(req, res) {
       const session = await requireSession(sql, req, res);
       if (!session) return;
 
-      const [expCount, eduCount, skillCount, connCount, pendingCount, suggestions, recent] = await Promise.all([
+      const [expCount, eduCount, skillCount, connCount, pendingCount, viewsCount, suggestions, recent] = await Promise.all([
         sql`SELECT COUNT(*) FROM work_experience WHERE engineer_id = ${session.id}`,
         sql`SELECT COUNT(*) FROM education WHERE engineer_id = ${session.id}`,
         sql`SELECT COUNT(*) FROM skills WHERE engineer_id = ${session.id}`,
         sql`SELECT COUNT(*) FROM connections WHERE status = 'accepted' AND (requester_id = ${session.id} OR addressee_id = ${session.id})`,
         sql`SELECT COUNT(*) FROM connections WHERE addressee_id = ${session.id} AND status = 'pending'`,
+        sql`SELECT COUNT(*) FROM profile_views WHERE viewed_id = ${session.id}`,
         sql`
           SELECT id, display_name, name, title, company, discipline, profile_photo
           FROM engineers
@@ -1728,6 +1746,7 @@ export default async function handler(req, res) {
         profileMissing: completion.missing,
         connectionsCount: Number(connCount[0].count),
         pendingRequestsCount: Number(pendingCount[0].count),
+        profileViewsCount: Number(viewsCount[0].count),
         suggestions: suggestions.map((s) => ({
           id: s.id,
           displayName: s.display_name || s.name,

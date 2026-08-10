@@ -166,7 +166,38 @@ body { background: var(--bg); padding-bottom: 0; }
 .db-completion-hint:hover { text-decoration: underline; }
 .db-completion-hint.is-done { color: var(--green-600); }
 
-.db-grid2 { margin-top: 24px; display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+/* Below 640px the 3 stat cards stack one-per-row at full .hub-card
+   padding, which pushes Quick actions (in .db-left, right after this
+   row) a long way down the page — exactly the "hard to find on phone"
+   complaint. Going 3-across earlier, with tighter padding/type sized
+   for that width, gets Quick actions back within about one scroll. */
+@media (max-width: 639px) {
+  /* minmax(0, 1fr), not plain 1fr — a bare 1fr track's minimum size is
+     "auto" (its content's own min-content width), so the completion
+     card's nowrap hint text was forcing that track wide and squeezing
+     the other two into slivers instead of the ellipsis ever kicking in.
+     Confirmed visually on a real 390px screenshot before this fix. */
+  .db-stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
+  .db-stat-card { padding: 12px 8px; min-width: 0; }
+  .db-stat-num { font-size: 19px; }
+  .db-stat-label { font-size: 9.5px; margin-top: 2px; }
+  .db-progress { margin-top: 8px; }
+  .db-completion-hint {
+    margin-top: 6px; font-size: 10px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Three-column, LinkedIn-style home layout. Below the desktop breakpoint
+   this collapses to a single column, and — since a CSS grid with no
+   explicit template-areas lays items out in DOM order — .db-left (the
+   identity card + Quick actions) renders before .db-center (the feed)
+   simply because it comes first in the markup. That's what makes Quick
+   actions show up near the top on a phone instead of buried under an
+   entire feed's worth of posts: no separate mobile-only markup or JS
+   reordering needed, just DOM order the single-column case already
+   wants for its own reasons. */
+.db-grid3 { margin-top: 24px; display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
 .db-section-h { margin: 0 0 16px; font-size: 15.5px; font-weight: 700; color: var(--ink); }
 .db-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
@@ -176,5 +207,27 @@ body { background: var(--bg); padding-bottom: 0; }
 .db-suggestion-card h4 { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--ink); }
 .db-suggestion-card p { margin: 2px 0 0; font-size: 12px; color: var(--ink-muted); }
 
+/* Mini identity card — Home's "top left" profile summary. */
+.db-profile-card { padding: 0 0 18px; text-align: center; overflow: hidden; }
+.db-profile-cover {
+  height: 56px; margin-bottom: -34px;
+  background: linear-gradient(120deg, var(--red-600), var(--green-700));
+}
+.db-profile-card .db-profile-cover[style*="background-image"] { background-size: cover; background-position: center; }
+.db-profile-avatar { display: inline-flex; }
+.db-profile-name-link { text-decoration: none; }
+.db-profile-card h3 { margin: 10px 16px 0; font-size: 15.5px; font-weight: 800; color: var(--ink); font-family: var(--font-display); }
+.db-profile-role { margin: 3px 16px 0; font-size: 12.5px; color: var(--ink-muted); }
+.db-profile-location { margin: 2px 16px 0; font-size: 12px; color: var(--ink-muted); }
+.db-profile-views {
+  display: block; margin: 14px 16px 0; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: 12.5px; color: var(--ink-muted); text-decoration: none;
+}
+.db-profile-views strong { color: var(--red-600); font-weight: 800; }
+.db-profile-views:hover strong { color: var(--red-500); }
+
 @media (min-width: 640px) { .db-stat-row { grid-template-columns: repeat(3, 1fr); } }
-@media (min-width: 900px) { .db-grid2 { grid-template-columns: 2fr 1fr; } }
+@media (min-width: 1000px) {
+  .db-grid3 { grid-template-columns: 260px 1fr 320px; }
+  .db-left, .db-right { position: sticky; top: 84px; max-height: calc(100vh - 100px); overflow-y: auto; }
+}
