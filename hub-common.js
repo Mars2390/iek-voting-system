@@ -6,8 +6,29 @@ window.Hub = (function () {
 
   var STORAGE_KEY = "eh_session_token";
 
+  // localStorage can throw rather than just return null in real mobile
+  // contexts — Safari Private Browsing, and (the one that actually
+  // matters here) WhatsApp/Facebook/Instagram in-app browser webviews,
+  // which is exactly how a link to this app spreads in practice.
+  // token() is called from requireAuth() at the top of every single
+  // protected page's script — an uncaught throw here doesn't just skip
+  // auth, it kills that whole script before it registers anything,
+  // which is what "the app crashes on mobile but works on desktop"
+  // turned out to actually be. Falling back to null here means the user
+  // gets redirected to the login page instead — a real, recoverable
+  // state instead of a frozen blank one.
+  function safeStorageGet(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+  function safeStorageSet(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+  }
+  function safeStorageRemove(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+  }
+
   function token() {
-    return localStorage.getItem(STORAGE_KEY);
+    return safeStorageGet(STORAGE_KEY);
   }
 
   function requireAuth() {
@@ -33,7 +54,7 @@ window.Hub = (function () {
       body: options.body,
     }).then(function (r) {
       if (r.status === 401) {
-        localStorage.removeItem(STORAGE_KEY);
+        safeStorageRemove(STORAGE_KEY);
         window.location.replace("/login.html");
         return new Promise(function () {}); // never resolves; we're navigating away
       }
@@ -310,5 +331,5 @@ window.Hub = (function () {
     }, 2600);
   }
 
-  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox, confirm: confirmDialog };
+  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox, confirm: confirmDialog, storageGet: safeStorageGet, storageSet: safeStorageSet, storageRemove: safeStorageRemove };
 })();

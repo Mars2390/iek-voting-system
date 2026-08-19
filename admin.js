@@ -1,8 +1,20 @@
 (function () {
   "use strict";
 
+  // localStorage can throw instead of just returning null in real
+  // mobile contexts (Safari Private Browsing, WhatsApp/Facebook/
+  // Instagram in-app browsers) — an uncaught throw here would kill this
+  // whole script before anything below it runs, same bug class found
+  // and fixed in login.js.
+  function safeStorageGet(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+  function safeStorageRemove(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+  }
+
   var STORAGE_KEY = "eh_admin_token";
-  var token = localStorage.getItem(STORAGE_KEY);
+  var token = safeStorageGet(STORAGE_KEY);
   if (!token) {
     window.location.replace("/admin-login.html");
     return;
@@ -19,7 +31,7 @@
     }
     return fetch("/api/auth?" + params.toString(), { method: options.method || "GET", headers: headers, body: options.body }).then(function (r) {
       if (r.status === 401) {
-        localStorage.removeItem(STORAGE_KEY);
+        safeStorageRemove(STORAGE_KEY);
         window.location.replace("/admin-login.html");
         return new Promise(function () {});
       }
@@ -61,7 +73,7 @@
 
   document.getElementById("ad-logout").addEventListener("click", function () {
     adminApi("admin-logout", { method: "POST" }).finally(function () {
-      localStorage.removeItem(STORAGE_KEY);
+      safeStorageRemove(STORAGE_KEY);
       window.location.href = "/admin-login.html";
     });
   });

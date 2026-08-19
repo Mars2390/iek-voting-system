@@ -107,14 +107,31 @@
     "</header>" +
     '<nav class="mobile-tabbar">' + links.map(tabHtml).join("") + "</nav>";
 
+  // localStorage can throw instead of just returning null in real
+  // mobile contexts (Safari Private Browsing, WhatsApp/Facebook/
+  // Instagram in-app browsers) — an uncaught throw anywhere in this
+  // script's top-level execution kills every handler below it that
+  // hasn't been registered yet, which is what "the app crashes on
+  // mobile" turned out to actually be (traced to the same unguarded
+  // pattern in login.js).
+  function safeStorageGet(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+  function safeStorageSet(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+  }
+  function safeStorageRemove(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+  }
+
   var STORAGE_KEY = "eh_session_token";
   function doLogout() {
-    var token = localStorage.getItem(STORAGE_KEY);
+    var token = safeStorageGet(STORAGE_KEY);
     fetch("/api/auth?action=logout", {
       method: "POST",
       headers: { Authorization: "Bearer " + token },
     }).finally(function () {
-      localStorage.removeItem(STORAGE_KEY);
+      safeStorageRemove(STORAGE_KEY);
       window.location.href = "/login.html";
     });
   }
@@ -127,7 +144,7 @@
   var sunIcon = document.getElementById("nav-theme-icon-sun");
   var moonIcon = document.getElementById("nav-theme-icon-moon");
   function currentlyDark() {
-    var saved = localStorage.getItem(THEME_KEY);
+    var saved = safeStorageGet(THEME_KEY);
     if (saved === "dark") return true;
     if (saved === "light") return false;
     return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -140,7 +157,7 @@
   updateThemeIcon();
   themeBtn.addEventListener("click", function () {
     var next = currentlyDark() ? "light" : "dark";
-    localStorage.setItem(THEME_KEY, next);
+    safeStorageSet(THEME_KEY, next);
     document.documentElement.setAttribute("data-theme", next);
     updateThemeIcon();
   });
@@ -161,7 +178,7 @@
 
   // Unread-message badge (desktop nav, mobile drawer — no longer used
   // now that Messages is a bottom tab — and the tab bar itself).
-  var token = localStorage.getItem(STORAGE_KEY);
+  var token = safeStorageGet(STORAGE_KEY);
   function refreshUnreadBadge() {
     if (!token) return;
     fetch("/api/auth?action=conversations", { headers: { Authorization: "Bearer " + token } })

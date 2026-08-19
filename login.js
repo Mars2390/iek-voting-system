@@ -4,8 +4,21 @@
   var STORAGE_KEY = "eh_session_token";
   var REMEMBER_KEY = "eh_remembered_number";
 
+  // localStorage can throw instead of just returning null in real
+  // mobile contexts — Safari Private Browsing, and critically, WhatsApp/
+  // Facebook/Instagram in-app browser webviews, which is exactly how a
+  // link to this app spreads in practice. This was a real, confirmed
+  // bug: the unguarded read below used to run before the submit handler
+  // was even registered, so on any browser where it threw, the entire
+  // script died right there — the login form rendered but tapping
+  // Continue did nothing at all, which is what "the app crashes on
+  // mobile" turned out to actually be.
+  function safeStorageGet(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+
   // Already logged in? Skip straight to the dashboard.
-  var existingToken = localStorage.getItem(STORAGE_KEY);
+  var existingToken = safeStorageGet(STORAGE_KEY);
   if (existingToken) {
     fetch("/api/auth?action=me", {
       headers: { Authorization: "Bearer " + existingToken },
@@ -39,7 +52,7 @@
   // safe. The PIN itself is never stored here; autocomplete tokens
   // below let the browser's OWN password manager offer to remember
   // that part, which is the appropriate place for a secret to live.
-  var rememberedNumber = localStorage.getItem(REMEMBER_KEY);
+  var rememberedNumber = safeStorageGet(REMEMBER_KEY);
   if (rememberedNumber) document.getElementById("lg-number").value = rememberedNumber;
 
   function showError(message) {
@@ -143,8 +156,19 @@
         }
         if (result.data.needsPinSetup) return enterSetupPinMode();
         if (result.data.needsPin) return enterEnterPinMode();
-        localStorage.setItem(STORAGE_KEY, result.data.token);
-        localStorage.setItem(REMEMBER_KEY, membershipNumber);
+        // The login itself succeeded server-side — but if the token
+        // can't actually be saved (storage blocked), redirecting to
+        // dashboard.html would just bounce straight back here, since
+        // requireAuth() would find no token there either. An infinite
+        // silent loop is worse than telling the user plainly what's
+        // wrong and how to fix it.
+        try {
+          localStorage.setItem(STORAGE_KEY, result.data.token);
+          localStorage.setItem(REMEMBER_KEY, membershipNumber);
+        } catch (e) {
+          showError("Your browser is blocking this site from staying signed in — common in the WhatsApp/Facebook in-app browser or Private Browsing. Open this link in Safari or Chrome directly instead.");
+          return;
+        }
         window.location.href = "/dashboard.html";
       })
       .catch(function () {

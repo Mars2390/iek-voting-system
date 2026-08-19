@@ -6,7 +6,16 @@
   // collide or be confused for one another.
   var STORAGE_KEY = "eh_admin_token";
 
-  var existingToken = localStorage.getItem(STORAGE_KEY);
+  // localStorage can throw instead of just returning null in real
+  // mobile contexts (Safari Private Browsing, WhatsApp/Facebook/
+  // Instagram in-app browsers) — an uncaught throw here would kill this
+  // whole script before the submit handler below is even registered,
+  // same bug class found and fixed in login.js.
+  function safeStorageGet(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+
+  var existingToken = safeStorageGet(STORAGE_KEY);
   if (existingToken) {
     fetch("/api/auth?action=admin-me", { headers: { Authorization: "Bearer " + existingToken } })
       .then(function (r) { return r.ok ? window.location.replace("/admin.html") : null; })
@@ -49,7 +58,12 @@
       .then(function (result) {
         setLoading(false);
         if (!result.ok) return showError(result.data.error || "Something went wrong. Please try again.");
-        localStorage.setItem(STORAGE_KEY, result.data.token);
+        try {
+          localStorage.setItem(STORAGE_KEY, result.data.token);
+        } catch (e) {
+          showError("Your browser is blocking this site from staying signed in (common in Private Browsing). Try a normal browser tab.");
+          return;
+        }
         window.location.href = "/admin.html";
       })
       .catch(function () {
