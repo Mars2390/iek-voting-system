@@ -454,13 +454,15 @@
   });
 
   function deleteEntry(action, id) {
-    H.confirm({ message: "This entry will be removed from your profile." }).then(function (ok) {
+    var message = action === "skills" ? "This skill will be removed from your profile." : "This entry will be removed from your profile.";
+    H.confirm({ message: message }).then(function (ok) {
       if (!ok) return;
       H.api(action, { method: "DELETE", query: { id: id } })
         .then(function () { return H.api(action, { query: { engineerId: state.engineer.id } }); })
         .then(function (data) {
           if (action === "work-experience") { state.experience = data.experience; renderExperience(); }
-          else { state.education = data.education; renderEducation(); }
+          else if (action === "education") { state.education = data.education; renderEducation(); }
+          else { state.skills = data.skills; renderSkills(); }
         })
         .catch(function (err) { H.toast(err.message, true); });
     });
@@ -470,31 +472,73 @@
   function renderSkills() {
     var list = document.getElementById("pf-skills-list");
     var form = document.getElementById("pf-skill-form");
+    // form starts with the raw `hidden` HTML attribute in profile.html —
+    // the site-wide `[hidden] { display: none !important; }` safety net
+    // (hub.css) always wins over a plain, non-!important class rule like
+    // .pf-skill-form.is-open{display:flex}, so toggling only the class
+    // left this form permanently unreachable regardless of state.isSelf.
+    // That safety net exists specifically so other components CAN toggle
+    // the attribute itself and have it actually take effect — this is
+    // that fix, applied to the one place still using the class-only
+    // pattern it was written to guard against.
+    form.hidden = !state.isSelf;
     form.classList.toggle("is-open", state.isSelf);
     if (!state.skills.length) {
       list.innerHTML = state.isSelf ? "" : '<div class="hub-empty" style="padding:8px 0;">No skills listed.</div>';
-    } else {
-      list.innerHTML = state.skills
-        .map(function (s) {
-          return (
-            '<span class="hub-tag' + (state.isSelf ? " removable" : "") + '" data-id="' + s.id + '">' +
-            H.escapeHtml(s.skill_name) +
-            (state.isSelf ? ' <span class="rm" data-rm="' + s.id + '">&times;</span>' : "") +
-            "</span>"
-          );
-        })
-        .join("");
-      if (state.isSelf) {
-        list.querySelectorAll("[data-rm]").forEach(function (el) {
-          el.addEventListener("click", function () {
-            H.api("skills", { method: "DELETE", query: { id: el.dataset.rm } })
-              .then(function () { return H.api("skills", { query: { engineerId: state.engineer.id } }); })
-              .then(function (data) { state.skills = data.skills; renderSkills(); })
-              .catch(function (err) { H.toast(err.message, true); });
-          });
-        });
-      }
+      return;
     }
+    list.innerHTML = state.skills
+      .map(function (s) {
+        if (!state.isSelf) return '<span class="hub-tag">' + H.escapeHtml(s.skill_name) + "</span>";
+        return (
+          '<span class="hub-tag removable" data-id="' + s.id + '">' +
+          '<span class="skill-name">' + H.escapeHtml(s.skill_name) + "</span>" +
+          '<span class="edit" data-edit-skill="' + s.id + '" role="button" aria-label="Edit skill" title="Edit">&#9998;</span>' +
+          '<span class="rm" data-rm="' + s.id + '" role="button" aria-label="Remove skill" title="Remove">&times;</span>' +
+          "</span>"
+        );
+      })
+      .join("");
+    if (!state.isSelf) return;
+    list.querySelectorAll("[data-rm]").forEach(function (el) {
+      el.addEventListener("click", function () { deleteEntry("skills", Number(el.dataset.rm)); });
+    });
+    list.querySelectorAll("[data-edit-skill]").forEach(function (el) {
+      el.addEventListener("click", function () { startEditingSkill(Number(el.dataset.editSkill)); });
+    });
+  }
+
+  // Skills are a single short field, so editing happens inline in the
+  // pill itself rather than opening the fuller form Experience/Education
+  // use for their multi-field entries — same edit/delete affordances,
+  // lighter-weight interaction to match what there actually is to edit.
+  function startEditingSkill(id) {
+    var skill = state.skills.find(function (s) { return s.id === id; });
+    var pill = document.querySelector('.hub-tag[data-id="' + id + '"]');
+    if (!skill || !pill) return;
+    pill.classList.add("is-editing");
+    pill.innerHTML =
+      '<input type="text" class="pf-skill-edit-input" maxlength="80" value="' + H.escapeHtml(skill.skill_name) + '" />' +
+      '<span class="edit is-save" data-save-skill role="button" aria-label="Save" title="Save">&#10003;</span>' +
+      '<span class="rm" data-cancel-skill role="button" aria-label="Cancel" title="Cancel">&times;</span>';
+    var input = pill.querySelector("input");
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+
+    function save() {
+      var newName = input.value.trim();
+      if (!newName || newName === skill.skill_name) { renderSkills(); return; }
+      H.api("skills", { method: "PUT", body: { id: id, skillName: newName } })
+        .then(function () { return H.api("skills", { query: { engineerId: state.engineer.id } }); })
+        .then(function (data) { state.skills = data.skills; renderSkills(); })
+        .catch(function (err) { H.toast(err.message, true); });
+    }
+    pill.querySelector("[data-save-skill]").addEventListener("click", save);
+    pill.querySelector("[data-cancel-skill]").addEventListener("click", function () { renderSkills(); });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); save(); }
+      if (e.key === "Escape") renderSkills();
+    });
   }
   document.getElementById("pf-skill-form").addEventListener("submit", function (e) {
     e.preventDefault();

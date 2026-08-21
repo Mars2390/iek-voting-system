@@ -84,9 +84,22 @@
   color: var(--ink);
   border: 1px solid var(--border);
 }
-.hub-tag.removable { gap: 6px; padding-right: 8px; }
-.hub-tag .rm { cursor: pointer; color: var(--ink-muted); font-weight: 700; }
+.hub-tag.removable { gap: 7px; padding-right: 8px; }
+.hub-tag .rm { cursor: pointer; color: var(--ink-muted); font-weight: 700; line-height: 1; }
 .hub-tag .rm:hover { color: var(--red-600); }
+.hub-tag .edit { cursor: pointer; color: var(--ink-muted); font-size: 11px; line-height: 1; }
+.hub-tag .edit:hover { color: var(--red-600); }
+.hub-tag.is-editing { padding: 4px 6px 4px 10px; gap: 6px; }
+/* font-size: 16px is deliberate, not a default — anything smaller
+   triggers Safari/Chrome's auto-zoom-on-focus on phones, a bug this
+   codebase already ran into and fixed everywhere else once before. */
+.pf-skill-edit-input {
+  font-family: var(--font-body); font-size: 16px; font-weight: 600; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--red-600); border-radius: 999px;
+  padding: 3px 10px; outline: none; width: 130px; min-width: 0;
+}
+.hub-tag .edit.is-save { color: var(--green-600); font-size: 13px; }
+.hub-tag .edit.is-save:hover { color: var(--green-700); }
 
 .hub-empty {
   text-align: center;

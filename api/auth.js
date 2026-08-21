@@ -592,13 +592,27 @@ export default async function handler(req, res) {
         return res.status(201).json({ skill: row || null });
       }
 
+      if (req.method === "PUT") {
+        const b = req.body || {};
+        const id = Number(b.id);
+        const name = String(b.skillName || "").trim().slice(0, 80);
+        if (!id || !name) return res.status(400).json({ error: "Enter a skill name." });
+        const [dupe] = await sql`SELECT id FROM skills WHERE engineer_id = ${session.id} AND skill_name = ${name} AND id != ${id}`;
+        if (dupe) return res.status(409).json({ error: "You already have a skill with that name." });
+        const [row] = await sql`
+          UPDATE skills SET skill_name = ${name} WHERE id = ${id} AND engineer_id = ${session.id} RETURNING *
+        `;
+        if (!row) return res.status(404).json({ error: "Skill not found." });
+        return res.status(200).json({ skill: row });
+      }
+
       if (req.method === "DELETE") {
         const id = Number(req.query.id || (req.body || {}).id);
         await sql`DELETE FROM skills WHERE id = ${id} AND engineer_id = ${session.id}`;
         return res.status(200).json({ success: true });
       }
 
-      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      res.setHeader("Allow", "GET, POST, PUT, DELETE, OPTIONS");
       return res.status(405).json({ error: "Method not allowed." });
     }
 
