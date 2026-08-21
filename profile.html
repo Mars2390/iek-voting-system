@@ -84,17 +84,23 @@
           <button id="pf-about-edit-btn" class="pf-edit-link" type="button" hidden>Edit</button>
         </div>
         <p id="pf-bio-view" class="pf-bio">—</p>
-        <form id="pf-about-form" hidden>
-          <label class="lg-field">
-            <span>Bio</span>
-            <textarea id="pf-input-bio" rows="4" style="width:100%;font-family:var(--font-body);font-size:14px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--ink);"></textarea>
-          </label>
-          <div class="pf-form-actions">
-            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
-            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
-          </div>
-        </form>
       </section>
+
+      <div class="hub-modal-overlay pf-form-modal-overlay" id="pf-about-modal" hidden>
+        <div class="hub-modal pf-form-modal">
+          <div class="hub-modal-head"><h3>Edit About</h3><button type="button" class="hub-modal-close" data-modal-close aria-label="Close">&times;</button></div>
+          <form id="pf-about-form" class="hub-modal-body pf-form-modal-body">
+            <label class="lg-field">
+              <span>Bio</span>
+              <textarea id="pf-input-bio" rows="4" class="pf-form-textarea"></textarea>
+            </label>
+            <div class="pf-form-actions">
+              <button type="button" class="eh-btn eh-btn-ghost-light pf-form-btn pf-cancel">Cancel</button>
+              <button type="submit" class="eh-btn eh-btn-save pf-form-btn">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <section class="hub-card pf-section">
         <div class="pf-section-head">
@@ -102,22 +108,28 @@
           <button id="pf-exp-add-btn" class="pf-edit-link" type="button" hidden>+ Add</button>
         </div>
         <div id="pf-exp-list" class="pf-entry-list"></div>
-        <form id="pf-exp-form" class="pf-entry-form" hidden>
-          <input type="hidden" id="pf-exp-id" />
-          <label class="lg-field"><span>Job title</span><input type="text" id="pf-exp-title" required /></label>
-          <label class="lg-field"><span>Company</span><input type="text" id="pf-exp-company" required /></label>
-          <div class="pf-form-row">
-            <label class="lg-field"><span>Start date</span><input type="date" id="pf-exp-start" /></label>
-            <label class="lg-field"><span>End date</span><input type="date" id="pf-exp-end" /></label>
-          </div>
-          <label class="pf-checkbox"><input type="checkbox" id="pf-exp-current" /> I currently work here</label>
-          <label class="lg-field"><span>Description</span><textarea id="pf-exp-desc" rows="3" style="width:100%;font-family:var(--font-body);font-size:14px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--ink);"></textarea></label>
-          <div class="pf-form-actions">
-            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
-            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
-          </div>
-        </form>
       </section>
+
+      <div class="hub-modal-overlay pf-form-modal-overlay" id="pf-exp-modal" hidden>
+        <div class="hub-modal pf-form-modal">
+          <div class="hub-modal-head"><h3 id="pf-exp-modal-title">Add Experience</h3><button type="button" class="hub-modal-close" data-modal-close aria-label="Close">&times;</button></div>
+          <form id="pf-exp-form" class="hub-modal-body pf-form-modal-body">
+            <input type="hidden" id="pf-exp-id" />
+            <label class="lg-field"><span>Job title</span><input type="text" id="pf-exp-title" required /></label>
+            <label class="lg-field"><span>Company</span><input type="text" id="pf-exp-company" required /></label>
+            <div class="pf-form-row">
+              <label class="lg-field"><span>Start date</span><input type="date" id="pf-exp-start" /></label>
+              <label class="lg-field"><span>End date</span><input type="date" id="pf-exp-end" /></label>
+            </div>
+            <label class="pf-checkbox"><input type="checkbox" id="pf-exp-current" /> I currently work here</label>
+            <label class="lg-field"><span>Description</span><textarea id="pf-exp-desc" rows="3" class="pf-form-textarea"></textarea></label>
+            <div class="pf-form-actions">
+              <button type="button" class="eh-btn eh-btn-ghost-light pf-form-btn pf-cancel">Cancel</button>
+              <button type="submit" class="eh-btn eh-btn-save pf-form-btn">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <section class="hub-card pf-section">
         <div class="pf-section-head">
@@ -125,21 +137,27 @@
           <button id="pf-edu-add-btn" class="pf-edit-link" type="button" hidden>+ Add</button>
         </div>
         <div id="pf-edu-list" class="pf-entry-list"></div>
-        <form id="pf-edu-form" class="pf-entry-form" hidden>
-          <input type="hidden" id="pf-edu-id" />
-          <label class="lg-field"><span>Institution</span><input type="text" id="pf-edu-institution" required /></label>
-          <label class="lg-field"><span>Degree</span><input type="text" id="pf-edu-degree" required /></label>
-          <label class="lg-field"><span>Field of study</span><input type="text" id="pf-edu-field" /></label>
-          <div class="pf-form-row">
-            <label class="lg-field"><span>Start year</span><input type="number" id="pf-edu-start" min="1950" max="2100" /></label>
-            <label class="lg-field"><span>End year</span><input type="number" id="pf-edu-end" min="1950" max="2100" /></label>
-          </div>
-          <div class="pf-form-actions">
-            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
-            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
-          </div>
-        </form>
       </section>
+
+      <div class="hub-modal-overlay pf-form-modal-overlay" id="pf-edu-modal" hidden>
+        <div class="hub-modal pf-form-modal">
+          <div class="hub-modal-head"><h3 id="pf-edu-modal-title">Add Education</h3><button type="button" class="hub-modal-close" data-modal-close aria-label="Close">&times;</button></div>
+          <form id="pf-edu-form" class="hub-modal-body pf-form-modal-body">
+            <input type="hidden" id="pf-edu-id" />
+            <label class="lg-field"><span>Institution</span><input type="text" id="pf-edu-institution" required /></label>
+            <label class="lg-field"><span>Degree</span><input type="text" id="pf-edu-degree" required /></label>
+            <label class="lg-field"><span>Field of study</span><input type="text" id="pf-edu-field" /></label>
+            <div class="pf-form-row">
+              <label class="lg-field"><span>Start year</span><input type="number" id="pf-edu-start" min="1950" max="2100" /></label>
+              <label class="lg-field"><span>End year</span><input type="number" id="pf-edu-end" min="1950" max="2100" /></label>
+            </div>
+            <div class="pf-form-actions">
+              <button type="button" class="eh-btn eh-btn-ghost-light pf-form-btn pf-cancel">Cancel</button>
+              <button type="submit" class="eh-btn eh-btn-save pf-form-btn">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <section class="hub-card pf-section">
         <h2>Skills</h2>

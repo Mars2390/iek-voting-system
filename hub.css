@@ -258,6 +258,38 @@
 .hub-confirm-actions { display: flex; gap: 10px; justify-content: center; margin-top: 22px; }
 .hub-confirm-actions .eh-btn { flex: 1; }
 
+/* Edit-field popup (H.editField) — same overlay/card as the confirm
+   dialog above, plus a labeled input. Sized deliberately larger than
+   the rest of the app's controls: this dialog is the one place every
+   member (not just tech-comfortable ones) has to read a label, type
+   into a field, and hit the right button with confidence — 16px+ text
+   and 48px+ touch targets throughout, not just where mobile-zoom
+   prevention already forced 16px on inputs elsewhere. */
+.hub-editfield { text-align: left; max-width: 400px; }
+.hub-editfield .hub-confirm-icon { margin: 0 auto 14px; }
+.hub-editfield .hub-confirm-title { text-align: center; font-size: 19px; }
+.hub-editfield-label { display: block; margin: 18px 0 8px; font-size: 15px; font-weight: 700; color: var(--ink); }
+.hub-editfield-input {
+  width: 100%; font-family: var(--font-body); font-size: 16px; font-weight: 600; color: var(--ink);
+  background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 13px 16px; outline: none; min-height: 48px; box-sizing: border-box;
+}
+.hub-editfield-input:focus { border-color: var(--red-600); box-shadow: 0 0 0 3px var(--red-100); }
+.hub-editfield-btn { min-height: 50px; font-size: 15px; }
+.eh-btn-save {
+  background: var(--green-600); color: #fff;
+  box-shadow: 0 10px 26px -8px rgba(0, 122, 61, 0.5);
+}
+.eh-btn-save:hover { background: var(--green-700); transform: translateY(-2px); }
+@media (max-width: 480px) {
+  /* Fills most of the screen on a phone rather than sitting as a small
+     centered card, per the same "large and unambiguous" brief.
+     width:100%, not calc(100% - Npx) — .hub-modal-overlay already
+     reserves 20px of padding on each side, so a further subtraction
+     here double-counted that margin. */
+  .hub-editfield { max-width: none; width: 100%; }
+}
+
 /* App-shell footer (app-footer.js) — every logged-in page ended with a
    bare </main> before this and no way to reach a privacy policy, terms,
    or a contact address from inside the product itself. */

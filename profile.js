@@ -258,27 +258,43 @@
   }
   document.getElementById("pf-about-edit-btn").addEventListener("click", function () {
     document.getElementById("pf-input-bio").value = state.engineer.bio || "";
-    toggleForm("pf-bio-view", "pf-about-form", true);
+    openFormModal("pf-about-modal");
   });
   document.getElementById("pf-about-form").addEventListener("submit", function (e) {
     e.preventDefault();
     saveProfileFields({ bio: document.getElementById("pf-input-bio").value.trim() }, function () {
-      toggleForm("pf-bio-view", "pf-about-form", false);
+      closeFormModal("pf-about-modal");
     });
   });
 
-  function toggleForm(viewId2, formId, showForm) {
-    document.getElementById(viewId2).hidden = showForm;
-    document.getElementById(formId).hidden = !showForm;
+  // Every "edit this" surface (About, Experience, Education) now opens
+  // as a centered popup instead of an inline form swapped in for the
+  // view — real feedback was that the inline version was easy to miss
+  // and unclear how to use, especially for members less at home in a
+  // small-text web UI. The view text stays visible underneath; the
+  // modal is purely an overlay on top of it, not a replacement.
+  function openFormModal(modalId) {
+    var modal = document.getElementById(modalId);
+    modal.hidden = false;
+    var firstInput = modal.querySelector("input:not([type=hidden]), textarea");
+    if (firstInput) firstInput.focus();
   }
+  function closeFormModal(modalId) {
+    document.getElementById(modalId).hidden = true;
+  }
+  document.querySelectorAll(".pf-form-modal-overlay").forEach(function (overlay) {
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) closeFormModal(overlay.id); });
+    overlay.querySelector("[data-modal-close]").addEventListener("click", function () { closeFormModal(overlay.id); });
+  });
   document.querySelectorAll(".pf-cancel").forEach(function (btn) {
     btn.addEventListener("click", function () {
-      var form = btn.closest("form");
-      form.hidden = true;
-      var view = form.previousElementSibling;
-      if (view) view.hidden = false;
-      form.classList.remove("is-editing-entry");
+      var overlay = btn.closest(".pf-form-modal-overlay");
+      if (overlay) closeFormModal(overlay.id);
     });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll(".pf-form-modal-overlay:not([hidden])").forEach(function (overlay) { closeFormModal(overlay.id); });
   });
 
   function saveProfileFields(fields, onDone) {
@@ -345,7 +361,8 @@
   document.getElementById("pf-exp-add-btn").addEventListener("click", function () {
     document.getElementById("pf-exp-form").reset();
     document.getElementById("pf-exp-id").value = "";
-    document.getElementById("pf-exp-form").hidden = false;
+    document.getElementById("pf-exp-modal-title").textContent = "Add Experience";
+    openFormModal("pf-exp-modal");
   });
   function editExperience(id) {
     var x = state.experience.find(function (r) { return r.id === id; });
@@ -357,7 +374,8 @@
     document.getElementById("pf-exp-end").value = x.end_date ? x.end_date.slice(0, 10) : "";
     document.getElementById("pf-exp-current").checked = x.is_current;
     document.getElementById("pf-exp-desc").value = x.description || "";
-    document.getElementById("pf-exp-form").hidden = false;
+    document.getElementById("pf-exp-modal-title").textContent = "Edit Experience";
+    openFormModal("pf-exp-modal");
   }
   document.getElementById("pf-exp-form").addEventListener("submit", function (e) {
     e.preventDefault();
@@ -376,7 +394,7 @@
       .then(function (data) {
         state.experience = data.experience;
         renderExperience();
-        document.getElementById("pf-exp-form").hidden = true;
+        closeFormModal("pf-exp-modal");
         H.toast("Saved");
       })
       .catch(function (err) { H.toast(err.message, true); });
@@ -418,7 +436,8 @@
   document.getElementById("pf-edu-add-btn").addEventListener("click", function () {
     document.getElementById("pf-edu-form").reset();
     document.getElementById("pf-edu-id").value = "";
-    document.getElementById("pf-edu-form").hidden = false;
+    document.getElementById("pf-edu-modal-title").textContent = "Add Education";
+    openFormModal("pf-edu-modal");
   });
   function editEducation(id) {
     var x = state.education.find(function (r) { return r.id === id; });
@@ -429,7 +448,8 @@
     document.getElementById("pf-edu-field").value = x.field_of_study || "";
     document.getElementById("pf-edu-start").value = x.start_year || "";
     document.getElementById("pf-edu-end").value = x.end_year || "";
-    document.getElementById("pf-edu-form").hidden = false;
+    document.getElementById("pf-edu-modal-title").textContent = "Edit Education";
+    openFormModal("pf-edu-modal");
   }
   document.getElementById("pf-edu-form").addEventListener("submit", function (e) {
     e.preventDefault();
@@ -447,15 +467,31 @@
       .then(function (data) {
         state.education = data.education;
         renderEducation();
-        document.getElementById("pf-edu-form").hidden = true;
+        closeFormModal("pf-edu-modal");
         H.toast("Saved");
       })
       .catch(function (err) { H.toast(err.message, true); });
   });
 
+  // A generic "this entry will be removed" was accurate but vague —
+  // naming exactly what's being deleted is clearer for every member,
+  // not just a nice-to-have for anyone less confident clicking a red
+  // button on a screen full of small text.
+  function deleteEntryLabel(action, id) {
+    if (action === "skills") {
+      var skill = state.skills.find(function (s) { return s.id === id; });
+      return skill ? '"' + skill.skill_name + '"' : "this skill";
+    }
+    if (action === "work-experience") {
+      var exp = state.experience.find(function (x) { return x.id === id; });
+      return exp ? '"' + exp.job_title + " at " + exp.company_name + '"' : "this experience entry";
+    }
+    var edu = state.education.find(function (x) { return x.id === id; });
+    return edu ? '"' + edu.institution + '"' : "this education entry";
+  }
   function deleteEntry(action, id) {
-    var message = action === "skills" ? "This skill will be removed from your profile." : "This entry will be removed from your profile.";
-    H.confirm({ message: message }).then(function (ok) {
+    var message = "Remove " + deleteEntryLabel(action, id) + " from your profile? This can't be undone.";
+    H.confirm({ title: "Remove " + (action === "skills" ? "skill" : "entry") + "?", message: message }).then(function (ok) {
       if (!ok) return;
       H.api(action, { method: "DELETE", query: { id: id } })
         .then(function () { return H.api(action, { query: { engineerId: state.engineer.id } }); })
@@ -508,36 +544,26 @@
     });
   }
 
-  // Skills are a single short field, so editing happens inline in the
-  // pill itself rather than opening the fuller form Experience/Education
-  // use for their multi-field entries — same edit/delete affordances,
-  // lighter-weight interaction to match what there actually is to edit.
+  // A clear, centered popup instead of turning the small pill itself
+  // into a tiny inline input — feedback from real (often older) members
+  // was that the compact inline edit was hard to notice and unclear how
+  // to use. Same H.editField dialog Experience/Education's title/name
+  // rename could reuse too.
   function startEditingSkill(id) {
     var skill = state.skills.find(function (s) { return s.id === id; });
-    var pill = document.querySelector('.hub-tag[data-id="' + id + '"]');
-    if (!skill || !pill) return;
-    pill.classList.add("is-editing");
-    pill.innerHTML =
-      '<input type="text" class="pf-skill-edit-input" maxlength="80" value="' + H.escapeHtml(skill.skill_name) + '" />' +
-      '<span class="edit is-save" data-save-skill role="button" aria-label="Save" title="Save">&#10003;</span>' +
-      '<span class="rm" data-cancel-skill role="button" aria-label="Cancel" title="Cancel">&times;</span>';
-    var input = pill.querySelector("input");
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-
-    function save() {
-      var newName = input.value.trim();
-      if (!newName || newName === skill.skill_name) { renderSkills(); return; }
+    if (!skill) return;
+    H.editField({
+      title: "Edit Skill",
+      label: "Skill name",
+      value: skill.skill_name,
+      maxlength: 80,
+      saveText: "Save changes",
+    }).then(function (newName) {
+      if (newName === null || newName === skill.skill_name) return;
       H.api("skills", { method: "PUT", body: { id: id, skillName: newName } })
         .then(function () { return H.api("skills", { query: { engineerId: state.engineer.id } }); })
         .then(function (data) { state.skills = data.skills; renderSkills(); })
         .catch(function (err) { H.toast(err.message, true); });
-    }
-    pill.querySelector("[data-save-skill]").addEventListener("click", save);
-    pill.querySelector("[data-cancel-skill]").addEventListener("click", function () { renderSkills(); });
-    input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); save(); }
-      if (e.key === "Escape") renderSkills();
     });
   }
   document.getElementById("pf-skill-form").addEventListener("submit", function (e) {

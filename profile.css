@@ -123,11 +123,42 @@
 .pf-entry-actions button { background: none; border: none; cursor: pointer; color: var(--ink-muted); font-size: 12px; font-weight: 600; }
 .pf-entry-actions button:hover { color: var(--red-600); }
 
-.pf-entry-form { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); }
 .pf-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .pf-form-actions { display: flex; gap: 10px; margin-top: 4px; }
-.pf-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink); margin-bottom: 14px; }
+/* 15px/48px, not this app's usual compact control sizing — About/
+   Experience/Education edits are the one place every member (not just
+   the tech-comfortable ones) has to fill in a real form and hit the
+   right button, so the same "large and unambiguous" brief that shaped
+   the skill-edit popup applies here too. */
+.pf-checkbox { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--ink); margin-bottom: 14px; }
+.pf-checkbox input { width: 20px; height: 20px; }
 .pf-cancel {}
+
+/* About/Experience/Education edit popups — same overlay/card language
+   as H.confirm and H.editField (hub.css), just wider to hold a real
+   multi-field form instead of one line of text. */
+.pf-form-modal { max-width: 460px; }
+.pf-form-modal .hub-modal-head { padding: 18px 20px; }
+.pf-form-modal .hub-modal-head h3 { font-size: 18px; }
+.pf-form-modal .hub-modal-close { width: 40px; height: 40px; font-size: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.pf-form-modal .hub-modal-close:hover { background: var(--surface-sunken); }
+.pf-form-modal-body .lg-field span { font-size: 15px; font-weight: 700; }
+.pf-form-modal-body { padding: 18px 20px 20px; overflow-y: auto; }
+.pf-form-modal-body .lg-field { margin-bottom: 14px; }
+.pf-form-textarea {
+  width: 100%; font-family: var(--font-body); font-size: 16px;
+  padding: 12px 14px; border-radius: 10px; border: 1.5px solid var(--border);
+  background: var(--bg); color: var(--ink); resize: vertical; box-sizing: border-box;
+}
+.pf-form-textarea:focus { border-color: var(--red-600); box-shadow: 0 0 0 3px var(--red-100); outline: none; }
+.pf-form-btn { flex: 1; min-height: 50px; font-size: 15px; }
+@media (max-width: 480px) {
+  /* width:100%, not calc(100% - Npx) — .hub-modal-overlay already
+     reserves 20px of padding on each side, so a further subtraction
+     here double-counted that margin and left the card narrower than
+     intended on a phone. */
+  .pf-form-modal { max-width: none; width: 100%; max-height: 85vh; }
+}
 
 .pf-skills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .pf-skill-form { display: none; gap: 8px; margin-top: 12px; }

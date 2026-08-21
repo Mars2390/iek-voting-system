@@ -315,6 +315,71 @@ window.Hub = (function () {
     });
   }
 
+  // A single-field "edit" popup — same overlay/card/button mechanics as
+  // confirmDialog above (deliberately: a senior-friendly edit dialog and
+  // a senior-friendly delete dialog should look like siblings, not two
+  // different UI languages) plus a labeled input. Resolves the trimmed
+  // new value on Save, or null on Cancel/Escape/backdrop click — never
+  // resolves an empty string, so callers don't have to re-check that.
+  function editFieldDialog(opts) {
+    opts = opts || {};
+    var title = opts.title || "Edit";
+    var label = opts.label || "Value";
+    var value = opts.value || "";
+    var maxlength = opts.maxlength || 200;
+    var placeholder = opts.placeholder || "";
+    var saveText = opts.saveText || "Save changes";
+    var cancelText = opts.cancelText || "Cancel";
+
+    return new Promise(function (resolve) {
+      var overlay = document.createElement("div");
+      overlay.className = "hub-modal-overlay hub-confirm-overlay";
+      overlay.innerHTML =
+        '<div class="hub-confirm hub-editfield" role="dialog" aria-modal="true">' +
+        '<span class="hub-confirm-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg></span>' +
+        '<h3 class="hub-confirm-title"></h3>' +
+        '<label class="hub-editfield-label"></label>' +
+        '<input type="text" class="hub-editfield-input" />' +
+        '<div class="hub-confirm-actions">' +
+        '<button type="button" class="eh-btn eh-btn-ghost-light hub-editfield-btn hub-confirm-cancel"></button>' +
+        '<button type="button" class="eh-btn eh-btn-save hub-editfield-btn hub-confirm-ok"></button>' +
+        "</div></div>";
+      overlay.querySelector(".hub-confirm-title").textContent = title;
+      overlay.querySelector(".hub-editfield-label").textContent = label;
+      overlay.querySelector(".hub-confirm-cancel").textContent = cancelText;
+      overlay.querySelector(".hub-confirm-ok").textContent = saveText;
+      var input = overlay.querySelector(".hub-editfield-input");
+      input.value = value;
+      input.maxLength = maxlength;
+      input.placeholder = placeholder;
+      document.body.appendChild(overlay);
+      var prevScroll = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+
+      function finish(result) {
+        document.body.style.overflow = prevScroll;
+        document.removeEventListener("keydown", onKey);
+        overlay.remove();
+        resolve(result);
+      }
+      function save() {
+        var v = input.value.trim();
+        if (!v) { input.focus(); return; }
+        finish(v);
+      }
+      function onKey(e) {
+        if (e.key === "Escape") finish(null);
+      }
+      document.addEventListener("keydown", onKey);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) finish(null); });
+      overlay.querySelector(".hub-confirm-cancel").addEventListener("click", function () { finish(null); });
+      overlay.querySelector(".hub-confirm-ok").addEventListener("click", save);
+      input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); save(); } });
+      input.focus();
+      input.select();
+    });
+  }
+
   function toast(message, isError) {
     var el = document.createElement("div");
     el.textContent = message;
@@ -331,5 +396,5 @@ window.Hub = (function () {
     }, 2600);
   }
 
-  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox, confirm: confirmDialog, storageGet: safeStorageGet, storageSet: safeStorageSet, storageRemove: safeStorageRemove };
+  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox, confirm: confirmDialog, editField: editFieldDialog, storageGet: safeStorageGet, storageSet: safeStorageSet, storageRemove: safeStorageRemove };
 })();
