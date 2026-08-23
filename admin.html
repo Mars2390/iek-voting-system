@@ -275,6 +275,41 @@
   </div>
 </div>
 
+<div id="ad-resend-event-overlay" class="hub-modal-overlay" hidden>
+  <div class="hub-modal pf-form-modal">
+    <div class="hub-modal-head">
+      <div>
+        <h3>Send Event Email</h3>
+        <p id="ad-resend-event-for" class="ad-thread-sender-line"></p>
+      </div>
+      <button type="button" id="ad-resend-event-close" class="hub-modal-close">&times;</button>
+    </div>
+    <form id="ad-resend-event-form" class="hub-modal-body pf-form-modal-body">
+      <input type="hidden" id="ad-resend-event-id" />
+      <label class="lg-field"><span>Subject</span><input type="text" id="ad-resend-event-subject" required /></label>
+      <label class="lg-field"><span>Message</span><textarea id="ad-resend-event-body" rows="5" class="pf-form-textarea" required></textarea></label>
+      <div class="lg-field">
+        <span>Recipients</span>
+        <div class="ad-recipient-mode">
+          <label><input type="radio" name="ad-resend-recip-mode" value="all" checked /> All engineers with an email</label>
+          <label><input type="radio" name="ad-resend-recip-mode" value="individual" /> Select individuals</label>
+        </div>
+      </div>
+      <div id="ad-resend-recip-individual-group" class="lg-field" hidden>
+        <input type="text" id="ad-resend-recip-search" placeholder="Search by name…" style="margin-bottom:8px;" />
+        <div id="ad-resend-recip-list" class="ad-recip-list"></div>
+        <small><span id="ad-resend-recip-selected-count">0</span> selected</small>
+      </div>
+      <div id="ad-resend-event-error" class="lg-error" hidden></div>
+      <div id="ad-resend-event-result" class="ad-import-result" hidden></div>
+      <div class="ad-edit-actions">
+        <button type="button" id="ad-resend-event-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm">Cancel</button>
+        <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Send email</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="ad-edit-overlay" class="hub-modal-overlay" hidden>
   <div class="hub-modal">
     <div class="hub-modal-head"><h3>Edit engineer</h3><button type="button" id="ad-edit-close" class="hub-modal-close">&times;</button></div>

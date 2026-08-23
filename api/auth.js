@@ -15,8 +15,8 @@ import { sendBulkEmail, sendEventInviteEmail, sendThreadEmail, verifyInboundWebh
 // connections, follows, feed, jobs, profile, dashboard,
 // toggle-open-to-work, conversations, messages, admin-login,
 // admin-logout, admin-me, admin-engineers, admin-import,
-// admin-email-recipients, admin-send-email, admin-email-logs,
-// admin-email-templates, admin-support, admin-support-reply.
+// admin-email-recipients, admin-send-email, admin-send-event-email,
+// admin-email-logs, admin-email-templates, admin-support, admin-support-reply.
 //
 // A membership number is not a secret — it's a lookup key, not a
 // credential — so login also requires a PIN the member sets on their
@@ -2393,6 +2393,69 @@ export default async function handler(req, res) {
       return res.status(200).json({ sentCount: results.length - failed.length, failedCount: failed.length, status });
     }
 
+    // Manually (re-)send the event-invitation email for an existing
+    // event — same structured layout/content as the automatic send on
+    // creation (sendEventInviteEmail), just triggered from the event
+    // list instead of firing once at creation time. Not consent-filtered
+    // in "all" mode, matching the auto-send: this is the same official
+    // IEK Calendar content either way, not the marketing broadcasts the
+    // generic admin-send-email tool sends.
+    if (action === "admin-send-event-email") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      const b = req.body || {};
+      const eventId = Number(b.eventId);
+      const subject = String(b.subject || "").trim().slice(0, 255);
+      const body = String(b.body || "").trim().slice(0, 20000);
+      if (!eventId || !subject || !body) return res.status(400).json({ error: "Add a subject and a message." });
+
+      const [event] = await sql`
+        SELECT *, TO_CHAR(event_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS event_at_str FROM events WHERE id = ${eventId}
+      `;
+      if (!event) return res.status(404).json({ error: "Event not found." });
+
+      let recipients;
+      if (Array.isArray(b.emailRecipientIds) && b.emailRecipientIds.length) {
+        const ids = b.emailRecipientIds.map(Number).filter(Boolean);
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE id = ANY(${ids}) AND email IS NOT NULL AND email != ''`;
+      } else if (b.emailAll) {
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE email IS NOT NULL AND email != ''`;
+      } else {
+        return res.status(400).json({ error: "Choose at least one recipient." });
+      }
+      if (!recipients.length) return res.status(400).json({ error: "No matching engineers have an email address on file." });
+      if (recipients.length > 1000) return res.status(400).json({ error: "That's more than 1000 recipients in one send — narrow the selection." });
+
+      const recipientList = recipients.map((r) => ({ id: r.id, name: r.display_name || r.name, email: r.email }));
+      const eventDateStr = formatWallClockDate(event.event_at_str);
+      let results;
+      let topLevelError = null;
+      try {
+        results = await sendEventInviteEmail({
+          recipients: recipientList,
+          subjectTemplate: subject,
+          introTemplate: body,
+          event: { title: event.title, dateStr: eventDateStr, location: event.location, description: event.description, registerUrl: event.register_url },
+        });
+      } catch (err) {
+        topLevelError = err.message || String(err);
+        results = recipientList.map((r) => ({ engineerId: r.id, email: r.email, ok: false, error: topLevelError }));
+      }
+      const failed = results.filter((r) => !r.ok);
+      const status = failed.length === 0 ? "sent" : failed.length === results.length ? "failed" : "partial";
+      await sql`
+        INSERT INTO email_logs (sender_admin_email, recipient_ids, recipient_count, failed_count, subject, body, template_name, status, error_summary)
+        VALUES (${admin.email}, ${JSON.stringify(recipientList.map((r) => r.id))}, ${results.length}, ${failed.length}, ${subject}, ${body}, 'IEK Event Invitation', ${status},
+                ${topLevelError || (failed.length ? failed.slice(0, 5).map((f) => f.email + ": " + f.error).join("; ") : null)})
+      `;
+      if (topLevelError) return res.status(502).json({ error: "Couldn't send: " + topLevelError, sentCount: 0, failedCount: results.length });
+      return res.status(200).json({ sentCount: results.length - failed.length, failedCount: failed.length, status });
+    }
+
     if (action === "admin-email-logs") {
       if (req.method !== "GET") {
         res.setHeader("Allow", "GET, OPTIONS");
@@ -2612,7 +2675,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, save-email, support, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import, admin-email-recipients, admin-send-email, admin-email-logs, admin-email-templates, admin-support, admin-support-reply.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, save-email, support, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import, admin-email-recipients, admin-send-email, admin-send-event-email, admin-email-logs, admin-email-templates, admin-support, admin-support-reply.",
     });
   } catch (err) {
     return sendError(res, err);

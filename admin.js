@@ -291,8 +291,10 @@
     return day + " " + MONTHS[month - 1] + " " + m[1] + " · " + h12 + ":" + minute + " " + ampm;
   }
 
+  var allEvents = [];
   function loadEvents() {
     adminApi("events").then(function (d) {
+      allEvents = d.events;
       eventListEl.innerHTML = d.events.length
         ? d.events
             .map(function (ev) {
@@ -300,7 +302,10 @@
                 '<div class="hub-feed-item">' +
                 "<div><p><strong>" + escapeHtml(ev.title) + "</strong>" + (ev.isPast ? " — past" : "") + "</p>" +
                 "<time>" + escapeHtml(fmtEventDateTime(ev.eventAt)) + (ev.location ? " · " + escapeHtml(ev.location) : "") + "</time></div>" +
-                '<button type="button" class="ad-edit-btn" data-delete-event="' + ev.id + '" style="margin-left:auto;">Delete</button>' +
+                '<div style="margin-left:auto;display:flex;gap:14px;flex-shrink:0;">' +
+                '<button type="button" class="ad-edit-btn" data-send-event-email="' + ev.id + '">Send email</button>' +
+                '<button type="button" class="ad-edit-btn" data-delete-event="' + ev.id + '" style="color:var(--red-600);">Delete</button>' +
+                "</div>" +
                 "</div>"
               );
             })
@@ -315,6 +320,9 @@
               .catch(function (err) { toast(err.message, true); });
           });
         });
+      });
+      eventListEl.querySelectorAll("[data-send-event-email]").forEach(function (btn) {
+        btn.addEventListener("click", function () { openResendEventModal(Number(btn.dataset.sendEventEmail)); });
       });
     });
   }
@@ -398,7 +406,11 @@
 
   var allRecipients = [];
   function loadRecipients() {
-    adminApi("admin-email-recipients").then(function (d) {
+    // Returns the promise (not "fire and forget") — openResendEventModal
+    // awaits this so its picker never renders from a stale/empty
+    // allRecipients if it's opened before the page's initial load call
+    // has resolved.
+    return adminApi("admin-email-recipients").then(function (d) {
       allRecipients = d.engineers;
       document.getElementById("ad-recip-all-count").textContent = d.marketingConsentCount;
       var discSel = document.getElementById("ad-recip-discipline");
@@ -456,6 +468,98 @@
     radio.addEventListener("change", function () {
       document.getElementById("ad-event-recip-individual-group").hidden = radio.value !== "individual";
     });
+  });
+
+  // ---------- Send Email for an existing event ----------
+  var resendEventOverlay = document.getElementById("ad-resend-event-overlay");
+  var resendEventForm = document.getElementById("ad-resend-event-form");
+  var resendEventSelectedIds = {};
+
+  function openResendEventModal(eventId) {
+    var ev = allEvents.find(function (x) { return x.id === eventId; });
+    if (!ev) return;
+    document.getElementById("ad-resend-event-id").value = ev.id;
+    document.getElementById("ad-resend-event-for").textContent = "For: " + ev.title + " · " + fmtEventDateTime(ev.eventAt);
+    // Pre-filled from the same built-in template used on auto-send, with
+    // {{event_title}} already substituted — admin can still edit freely
+    // before sending, per the brief ("pre-fill... admin can edit before
+    // sending").
+    var tpl = allTemplates.find(function (t) { return t.name === "IEK Event Invitation"; });
+    document.getElementById("ad-resend-event-subject").value = tpl ? tpl.subject.replace("{{event_title}}", ev.title) : "You're invited: " + ev.title;
+    document.getElementById("ad-resend-event-body").value = tpl ? tpl.body : "";
+    document.querySelector('input[name="ad-resend-recip-mode"][value="all"]').checked = true;
+    document.getElementById("ad-resend-recip-individual-group").hidden = true;
+    resendEventSelectedIds = {};
+    document.getElementById("ad-resend-recip-selected-count").textContent = "0";
+    document.getElementById("ad-resend-recip-search").value = "";
+    document.getElementById("ad-resend-event-error").hidden = true;
+    document.getElementById("ad-resend-event-result").hidden = true;
+    resendEventOverlay.hidden = false;
+    // Refreshed on every open (not just rendered from whatever
+    // allRecipients already happens to hold) — the initial page-load
+    // call might still be in flight, and this also naturally picks up
+    // anyone who added an email since the admin last loaded the page.
+    loadRecipients().then(function () {
+      renderRecipientList("ad-resend-recip-list", "ad-resend-recip-selected-count", resendEventSelectedIds, "");
+    });
+  }
+  function closeResendEventModal() { resendEventOverlay.hidden = true; }
+  document.getElementById("ad-resend-event-close").addEventListener("click", closeResendEventModal);
+  document.getElementById("ad-resend-event-cancel").addEventListener("click", closeResendEventModal);
+  resendEventOverlay.addEventListener("click", function (e) { if (e.target === resendEventOverlay) closeResendEventModal(); });
+  document.getElementById("ad-resend-recip-search").addEventListener("input", function (e) {
+    renderRecipientList("ad-resend-recip-list", "ad-resend-recip-selected-count", resendEventSelectedIds, e.target.value.trim());
+  });
+  document.querySelectorAll('input[name="ad-resend-recip-mode"]').forEach(function (radio) {
+    radio.addEventListener("change", function () {
+      document.getElementById("ad-resend-recip-individual-group").hidden = radio.value !== "individual";
+    });
+  });
+  resendEventForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var errBox = document.getElementById("ad-resend-event-error");
+    var resultBox = document.getElementById("ad-resend-event-result");
+    errBox.hidden = true;
+    resultBox.hidden = true;
+
+    var payload = {
+      eventId: Number(document.getElementById("ad-resend-event-id").value),
+      subject: document.getElementById("ad-resend-event-subject").value.trim(),
+      body: document.getElementById("ad-resend-event-body").value.trim(),
+    };
+    var mode = document.querySelector('input[name="ad-resend-recip-mode"]:checked').value;
+    if (mode === "individual") {
+      var ids = Object.keys(resendEventSelectedIds).map(Number);
+      if (!ids.length) {
+        errBox.textContent = "Select at least one engineer.";
+        errBox.hidden = false;
+        return;
+      }
+      payload.emailRecipientIds = ids;
+    } else {
+      payload.emailAll = true;
+    }
+
+    var submitBtn = resendEventForm.querySelector("button[type=submit]");
+    var originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Sending…";
+    adminApi("admin-send-event-email", { method: "POST", body: payload })
+      .then(function (d) {
+        resultBox.className = "ad-import-result";
+        resultBox.innerHTML = '<div class="summary">Sent to ' + d.sentCount + " engineer" + (d.sentCount === 1 ? "" : "s") + (d.failedCount ? ", " + d.failedCount + " failed" : "") + ".</div>";
+        resultBox.hidden = false;
+        toast("Event email sent");
+        loadEmailLogs();
+      })
+      .catch(function (err) {
+        errBox.textContent = err.message;
+        errBox.hidden = false;
+      })
+      .finally(function () {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+      });
   });
 
   var allTemplates = [];
