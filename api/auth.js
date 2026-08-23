@@ -2,7 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getSql } from "./_db.js";
 import { applyCors, sendError } from "./_utils.js";
-import { sendBulkEmail, sendThreadEmail, verifyInboundWebhook, fetchReceivedEmail, extractThreadIdFromHeaders } from "./_email.js";
+import { sendBulkEmail, sendEventInviteEmail, sendThreadEmail, verifyInboundWebhook, fetchReceivedEmail, extractThreadIdFromHeaders } from "./_email.js";
 
 // The Engineer Hub member API. One file, many `?action=` values — NOT
 // split into more files because this project sits at the Vercel Hobby
@@ -619,7 +619,12 @@ export default async function handler(req, res) {
       try {
         event = verifyInboundWebhook(req.rawBody.toString("utf8"), req.headers);
       } catch (err) {
-        return res.status(401).json({ error: "Invalid webhook signature." });
+        // "Not configured" isn't security-sensitive (it doesn't help
+        // forge a signature) and is genuinely useful for confirming
+        // RESEND_WEBHOOK_SECRET actually made it into this deployment —
+        // worth a distinct message from an actual bad/forged signature.
+        const notConfigured = /RESEND_WEBHOOK_SECRET/.test(err.message || "");
+        return res.status(401).json({ error: notConfigured ? "Inbound email is not configured yet (RESEND_WEBHOOK_SECRET is unset)." : "Invalid webhook signature." });
       }
       // Resend can retry a webhook delivery, and this endpoint may also
       // be subscribed to event types beyond email.received (harmless to
@@ -1203,12 +1208,16 @@ export default async function handler(req, res) {
           if (tpl && recipients.length) {
             const recipientList = recipients.map((r) => ({ id: r.id, name: r.display_name || r.name, email: r.email }));
             const eventDateStr = formatWallClockDate(row.event_at_str);
-            const results = await sendBulkEmail({
+            // Structured layout (date/time + location card, description,
+            // a Register button pointed at the event's real register_url)
+            // — see sendEventInviteEmail/renderEventEmailHtml in
+            // api/_email.js. The template's own body still supplies the
+            // human intro line above that card, so it stays admin-editable.
+            const results = await sendEventInviteEmail({
               recipients: recipientList,
-              subject: tpl.subject,
-              body: tpl.body,
-              extraVars: { event_title: row.title, event_date: eventDateStr, event_location: row.location ? " at " + row.location : "" },
-              ctaLabel: "View on IEK Calendar", ctaUrl: "https://www.engineerhuub.com/calendar.html",
+              subjectTemplate: tpl.subject,
+              introTemplate: tpl.body,
+              event: { title: row.title, dateStr: eventDateStr, location: row.location, description: row.description, registerUrl: row.register_url },
             });
             const failed = results.filter((r) => !r.ok);
             const status = failed.length === 0 ? "sent" : failed.length === results.length ? "failed" : "partial";

@@ -73,10 +73,68 @@ function linkify(escapedText) {
 // the site itself uses IEK's red/green, but a bulk-mail brand color is a
 // separate, deliberate choice from the in-app UI palette.
 function renderHtmlEmail({ preheader, bodyText, ctaLabel, ctaUrl }) {
-  const escaped = escapeHtml(bodyText || "");
-  const withLinks = linkify(escaped).replace(/\n/g, "<br>");
+  const withLinks = linkify(escapeHtml(bodyText || "")).replace(/\n/g, "<br>");
+  return renderHtmlEmailRaw({
+    preheader,
+    innerHtml: '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#1b2733;">' + withLinks + "</td></tr></table>",
+    ctaLabel, ctaUrl,
+  });
+}
+
+// Structured event-details card (date/time, location) rendered as its
+// own bordered block rather than folded into the paragraph text — scannable
+// at a glance is the whole point of an event invite, and that's lost if
+// the date/location are just more words in a sentence.
+function renderEventDetailsCard({ dateStr, location }) {
+  const row = (icon, text) =>
+    text
+      ? '<tr><td style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1b2733;">' +
+        '<span style="display:inline-block;width:22px;">' + icon + "</span>" + escapeHtml(text) + "</td></tr>"
+      : "";
+  return (
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7fa;border:1px solid #e4e9ef;border-radius:10px;margin:18px 0;">' +
+    '<tr><td style="padding:16px 18px;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0">' +
+    row("&#128197;", dateStr) +
+    row("&#128205;", location) +
+    "</table></td></tr></table>"
+  );
+}
+
+// Dedicated renderer for IEK Calendar event invitations — the generic
+// renderHtmlEmail() wrapper is a single paragraph of text, which loses
+// exactly the things that make an invite actually useful: a date/time
+// and location scannable at a glance, and one unambiguous place to
+// register. introText is the (optionally admin-edited) template body,
+// kept as the human framing above the structured details.
+function renderEventEmailHtml({ introText, eventTitle, dateStr, location, description, registerUrl }) {
+  const introHtml = linkify(escapeHtml(introText || "")).replace(/\n/g, "<br>");
+  const descriptionHtml = description
+    ? '<tr><td style="padding:4px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:14.5px;line-height:1.65;color:#1b2733;">' +
+      linkify(escapeHtml(description)).replace(/\n/g, "<br>") + "</td></tr>"
+    : "";
+  const ctaUrl = registerUrl || "https://www.engineerhuub.com/calendar.html";
+  const ctaLabel = registerUrl ? "Register Now" : "View on IEK Calendar";
+  return renderHtmlEmailRaw({
+    preheader: "You're invited: " + eventTitle,
+    innerHtml:
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' +
+      '<tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#1b2733;">' + introHtml + "</td></tr>" +
+      '<tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:19px;font-weight:800;color:#0f2942;padding-top:14px;">' + escapeHtml(eventTitle) + "</td></tr>" +
+      '<tr><td>' + renderEventDetailsCard({ dateStr, location }) + "</td></tr>" +
+      descriptionHtml +
+      "</table>",
+    ctaLabel, ctaUrl,
+  });
+}
+
+// The shared chrome (header/footer/card) factored out of renderHtmlEmail
+// so the event-invite renderer can drop in its own structured body
+// instead of a single linkified paragraph, without duplicating the
+// header/footer markup.
+function renderHtmlEmailRaw({ preheader, innerHtml, ctaLabel, ctaUrl }) {
   const cta = ctaUrl
-    ? '<tr><td style="padding:8px 0 4px;"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:8px;background:#0d9488;">' +
+    ? '<tr><td style="padding:16px 0 4px;"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="border-radius:8px;background:#0d9488;">' +
       '<a href="' + escapeHtml(ctaUrl) + '" style="display:inline-block;padding:14px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;">' +
       escapeHtml(ctaLabel || "Open Engineer Hub") + "</a></td></tr></table></td></tr>"
     : "";
@@ -99,10 +157,8 @@ function renderHtmlEmail({ preheader, bodyText, ctaLabel, ctaUrl }) {
 <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#9fb3c8;margin-top:2px;">National Engineering Strategy Secretariat</div>
 </td></tr>
 <tr><td style="padding:32px 28px 8px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-<tr><td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#1b2733;">${withLinks}</td></tr>
+${innerHtml}
 ${cta}
-</table>
 </td></tr>
 <tr><td style="padding:26px 28px 28px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e4e9ef;padding-top:18px;">
@@ -129,7 +185,11 @@ Engineer Hub — a network for IEK-affiliated engineers.<br>
 // doesn't fire 300+ requests at once.
 const CONCURRENCY = 10;
 
-export async function sendBulkEmail({ recipients, subject, body, extraVars, ctaLabel, ctaUrl }) {
+// Shared fan-out: calls buildMessage(recipient) -> {subject, html, text}
+// for each recipient and sends it, bounded to CONCURRENCY in flight.
+// Both sendBulkEmail and sendEventInviteEmail are just different ways of
+// building that per-recipient message.
+async function sendPerRecipient(recipients, buildMessage) {
   const resend = getResend();
   const from = emailFrom();
   const replyTo = emailReplyTo();
@@ -139,18 +199,9 @@ export async function sendBulkEmail({ recipients, subject, body, extraVars, ctaL
     while (i < recipients.length) {
       const idx = i++;
       const r = recipients[idx];
-      const vars = Object.assign({ name: r.name || "there" }, extraVars || {});
-      const filledSubject = fillTemplate(subject, vars);
-      const filledBody = fillTemplate(body, vars);
       try {
-        const { data, error } = await resend.emails.send({
-          from,
-          replyTo,
-          to: r.email,
-          subject: filledSubject,
-          html: renderHtmlEmail({ preheader: filledSubject, bodyText: filledBody, ctaLabel, ctaUrl }),
-          text: filledBody,
-        });
+        const msg = buildMessage(r);
+        const { data, error } = await resend.emails.send({ from, replyTo, to: r.email, ...msg });
         if (error) throw new Error(error.message || "Resend rejected the message.");
         results.push({ engineerId: r.id, email: r.email, ok: true, resendId: data && data.id });
       } catch (err) {
@@ -160,6 +211,37 @@ export async function sendBulkEmail({ recipients, subject, body, extraVars, ctaL
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, recipients.length) }, worker));
   return results;
+}
+
+export async function sendBulkEmail({ recipients, subject, body, extraVars, ctaLabel, ctaUrl }) {
+  return sendPerRecipient(recipients, (r) => {
+    const vars = Object.assign({ name: r.name || "there" }, extraVars || {});
+    const filledSubject = fillTemplate(subject, vars);
+    const filledBody = fillTemplate(body, vars);
+    return {
+      subject: filledSubject,
+      html: renderHtmlEmail({ preheader: filledSubject, bodyText: filledBody, ctaLabel, ctaUrl }),
+      text: filledBody,
+    };
+  });
+}
+
+// Event invitations get their own structured layout (see
+// renderEventEmailHtml) instead of the generic single-paragraph one —
+// a date/time/location that's scannable at a glance, and one
+// unambiguous Register button, is the actual point of an invite.
+export async function sendEventInviteEmail({ recipients, subjectTemplate, introTemplate, event }) {
+  return sendPerRecipient(recipients, (r) => {
+    const vars = { name: r.name || "there", event_title: event.title, event_date: event.dateStr, event_location: event.location ? " at " + event.location : "" };
+    const filledSubject = fillTemplate(subjectTemplate, vars);
+    const filledIntro = fillTemplate(introTemplate, vars);
+    const html = renderEventEmailHtml({
+      introText: filledIntro, eventTitle: event.title, dateStr: event.dateStr,
+      location: event.location, description: event.description, registerUrl: event.registerUrl,
+    });
+    const textParts = [filledIntro, "", event.title, event.dateStr, event.location || null, event.description || null, event.registerUrl ? "Register: " + event.registerUrl : null].filter(Boolean);
+    return { subject: filledSubject, html, text: textParts.join("\n") };
+  });
 }
 
 export async function sendSingleEmail({ to, subject, body, ctaLabel, ctaUrl }) {

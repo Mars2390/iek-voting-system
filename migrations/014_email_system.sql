@@ -56,7 +56,7 @@ SELECT * FROM (VALUES
   ('Welcome to Engineer Hub', 'Welcome to Engineer Hub, {{name}}!',
    E'Hi {{name}},\n\nWelcome to Engineer Hub — the professional network for IEK-affiliated engineers. Your profile is ready, so take a moment to add your discipline, work history, and a photo so other members can find and connect with you.\n\nGlad to have you here.\n\nNational Engineering Strategy Secretariat', TRUE),
   ('IEK Event Invitation', 'You''re invited: {{event_title}}',
-   E'Hi {{name}},\n\nYou''re invited to {{event_title}} on {{event_date}}{{event_location}}.\n\nSee the IEK Calendar on Engineer Hub for full details.\n\nNational Engineering Strategy Secretariat', TRUE),
+   E'Hi {{name}},\n\nYou''re invited to the following IEK event. Full details below.\n\nNational Engineering Strategy Secretariat', TRUE),
   ('National Engineering Strategy Update', 'National Engineering Strategy — Update',
    E'Hi {{name}},\n\nHere''s the latest update from the National Engineering Strategy Secretariat.\n\n[Add your update here]\n\nNational Engineering Strategy Secretariat', TRUE),
   ('CPD Reminder', 'Reminder: Your CPD points', E'Hi {{name}},\n\nThis is a reminder to keep up with your Continuing Professional Development (CPD) points this cycle. Check the IEK Calendar on Engineer Hub for upcoming CPD seminars.\n\nNational Engineering Strategy Secretariat', TRUE),
