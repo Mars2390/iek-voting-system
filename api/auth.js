@@ -1204,7 +1204,20 @@ export default async function handler(req, res) {
         // member sees regardless of whether they have an email on file.
         try {
           const [tpl] = await sql`SELECT subject, body FROM email_templates WHERE name = 'IEK Event Invitation' AND is_builtin = TRUE`;
-          const recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE email IS NOT NULL AND email != ''`;
+          // Admin now explicitly chooses who gets the email — "all
+          // engineers with an email" is a deliberate selection, not the
+          // silent default it used to be, after the broadcast this
+          // action used to fire unconditionally reached everyone with no
+          // way to scope a single test send.
+          let recipients;
+          if (Array.isArray(b.emailRecipientIds) && b.emailRecipientIds.length) {
+            const ids = b.emailRecipientIds.map(Number).filter(Boolean);
+            recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE id = ANY(${ids}) AND email IS NOT NULL AND email != ''`;
+          } else if (b.emailAll) {
+            recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE email IS NOT NULL AND email != ''`;
+          } else {
+            recipients = [];
+          }
           if (tpl && recipients.length) {
             const recipientList = recipients.map((r) => ({ id: r.id, name: r.display_name || r.name, email: r.email }));
             const eventDateStr = formatWallClockDate(row.event_at_str);

@@ -94,7 +94,7 @@
 
   <section class="ad-card">
     <h2>IEK Calendar</h2>
-    <p class="ad-card-sub">Post AGMs, CPD seminars, and chapter events. Every member gets a notification when you post one.</p>
+    <p class="ad-card-sub">Post AGMs, CPD seminars, and chapter events. Every member gets an in-app notification when you post one — you choose separately below who also gets an email.</p>
     <form id="ad-event-form" class="ad-add-form" style="flex-direction:column;align-items:stretch;gap:14px;">
       <label class="lg-field"><span>Title</span><input type="text" id="ad-event-title" placeholder="e.g. IEK Annual General Meeting 2026" required /></label>
       <label class="lg-field">
@@ -114,6 +114,21 @@
         <span id="ad-event-image-label">Add event image (optional)…</span>
         <input type="file" id="ad-event-image-input" accept="image/*" hidden />
       </label>
+
+      <div class="lg-field">
+        <span>Email notification</span>
+        <p style="font-size:12.5px;color:var(--ink-muted);margin:0 0 8px;">The event still posts to the Calendar (and every member's in-app notifications) either way — this only controls who gets an email about it.</p>
+        <div class="ad-recipient-mode">
+          <label><input type="radio" name="ad-event-recip-mode" value="all" checked /> Send to all engineers with an email</label>
+          <label><input type="radio" name="ad-event-recip-mode" value="individual" /> Select individuals</label>
+        </div>
+      </div>
+      <div id="ad-event-recip-individual-group" class="lg-field" hidden>
+        <input type="text" id="ad-event-recip-search" placeholder="Search by name…" style="margin-bottom:8px;" />
+        <div id="ad-event-recip-list" class="ad-recip-list"></div>
+        <small><span id="ad-event-recip-selected-count">0</span> selected</small>
+      </div>
+
       <div id="ad-event-error" class="lg-error" hidden></div>
       <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm" style="align-self:flex-start;">Post event</button>
     </form>

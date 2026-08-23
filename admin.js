@@ -336,17 +336,37 @@
       documentUrl: document.getElementById("ad-event-document").value.trim(),
     };
 
+    var emailMode = document.querySelector('input[name="ad-event-recip-mode"]:checked').value;
+    if (emailMode === "individual") {
+      var ids = Object.keys(eventSelectedRecipientIds).map(Number);
+      if (!ids.length) {
+        eventError.textContent = "Select at least one engineer, or choose \"Send to all engineers with an email\".";
+        eventError.hidden = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+        return;
+      }
+      payload.emailRecipientIds = ids;
+    } else {
+      payload.emailAll = true;
+    }
+
     var uploadStep = pendingEventImage
       ? adminApi("upload-event-image", { method: "POST", headers: { "Content-Type": pendingEventImage.type || "image/jpeg" }, body: pendingEventImage }).then(function (d) { payload.imageUrl = d.url; })
       : Promise.resolve();
 
     uploadStep
       .then(function () { return adminApi("events", { method: "POST", body: payload }); })
-      .then(function () {
-        toast("Event posted — every member has been notified");
+      .then(function (d) {
+        var sentNote = emailMode === "individual" ? "sent to " + payload.emailRecipientIds.length + " selected engineer" + (payload.emailRecipientIds.length === 1 ? "" : "s") : "emailed to everyone with an address on file";
+        toast("Event posted — " + sentNote);
         eventForm.reset();
         pendingEventImage = null;
         eventImageLabel.textContent = "Add event image (optional)…";
+        eventSelectedRecipientIds = {};
+        document.getElementById("ad-event-recip-individual-group").hidden = true;
+        document.getElementById("ad-event-recip-selected-count").textContent = "0";
+        renderRecipientList("ad-event-recip-list", "ad-event-recip-selected-count", eventSelectedRecipientIds, "");
         loadEvents();
       })
       .catch(function (err) {
@@ -385,18 +405,25 @@
       discSel.innerHTML = d.disciplines.map(function (x) { return '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + "</option>"; }).join("");
       var compSel = document.getElementById("ad-recip-company");
       compSel.innerHTML = d.companies.map(function (x) { return '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + "</option>"; }).join("");
-      renderRecipientList("");
+      renderRecipientList("ad-recip-list", "ad-recip-selected-count", selectedRecipientIds, "");
+      renderRecipientList("ad-event-recip-list", "ad-event-recip-selected-count", eventSelectedRecipientIds, "");
     });
   }
 
+  // Shared by the Send Email form's "Choose individually" picker and the
+  // IEK Calendar event form's own recipient picker — same underlying
+  // engineer-with-email list, two independent selections (picking people
+  // for an event email has nothing to do with whatever's mid-edit in the
+  // Send Email form, and vice versa).
   var selectedRecipientIds = {};
-  function renderRecipientList(q) {
-    var listEl = document.getElementById("ad-recip-list");
+  var eventSelectedRecipientIds = {};
+  function renderRecipientList(listElId, countElId, selectedSet, q) {
+    var listEl = document.getElementById(listElId);
     var filtered = q ? allRecipients.filter(function (r) { return r.name.toLowerCase().indexOf(q.toLowerCase()) !== -1; }) : allRecipients;
     listEl.innerHTML = filtered
       .map(function (r) {
         return (
-          '<label class="ad-recip-row"><input type="checkbox" value="' + r.id + '" ' + (selectedRecipientIds[r.id] ? "checked" : "") + " />" +
+          '<label class="ad-recip-row"><input type="checkbox" value="' + r.id + '" ' + (selectedSet[r.id] ? "checked" : "") + " />" +
           escapeHtml(r.name) + (r.consentMarketing ? "" : ' <span class="ad-recip-noconsent">(not opted in)</span>') +
           '<span class="ad-recip-email">' + escapeHtml(r.email) + "</span></label>"
         );
@@ -404,13 +431,18 @@
       .join("") || '<div class="hub-empty">No matches.</div>';
     listEl.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
       cb.addEventListener("change", function () {
-        if (cb.checked) selectedRecipientIds[cb.value] = true;
-        else delete selectedRecipientIds[cb.value];
-        document.getElementById("ad-recip-selected-count").textContent = Object.keys(selectedRecipientIds).length;
+        if (cb.checked) selectedSet[cb.value] = true;
+        else delete selectedSet[cb.value];
+        document.getElementById(countElId).textContent = Object.keys(selectedSet).length;
       });
     });
   }
-  document.getElementById("ad-recip-search").addEventListener("input", function (e) { renderRecipientList(e.target.value.trim()); });
+  document.getElementById("ad-recip-search").addEventListener("input", function (e) {
+    renderRecipientList("ad-recip-list", "ad-recip-selected-count", selectedRecipientIds, e.target.value.trim());
+  });
+  document.getElementById("ad-event-recip-search").addEventListener("input", function (e) {
+    renderRecipientList("ad-event-recip-list", "ad-event-recip-selected-count", eventSelectedRecipientIds, e.target.value.trim());
+  });
 
   document.querySelectorAll('input[name="ad-recip-mode"]').forEach(function (radio) {
     radio.addEventListener("change", function () {
@@ -418,6 +450,11 @@
       document.getElementById("ad-recip-discipline-group").hidden = mode !== "discipline";
       document.getElementById("ad-recip-company-group").hidden = mode !== "company";
       document.getElementById("ad-recip-individual-group").hidden = mode !== "individual";
+    });
+  });
+  document.querySelectorAll('input[name="ad-event-recip-mode"]').forEach(function (radio) {
+    radio.addEventListener("change", function () {
+      document.getElementById("ad-event-recip-individual-group").hidden = radio.value !== "individual";
     });
   });
 
