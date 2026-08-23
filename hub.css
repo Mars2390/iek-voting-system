@@ -190,6 +190,7 @@
 /* Tab pills */
 .hub-tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 .hub-tab {
+  display: inline-flex; align-items: center; min-height: 44px;
   padding: 10px 4px; margin-right: 20px;
   font-size: 14px; font-weight: 600; color: var(--ink-muted);
   border-bottom: 2px solid transparent; cursor: pointer; background: none; border-left: none; border-right: none; border-top: none;

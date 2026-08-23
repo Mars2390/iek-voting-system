@@ -1,6 +1,7 @@
 .lg-page {
   position: relative;
-  min-height: 100vh;
+  min-height: 100vh; /* fallback for browsers without dvh support */
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;

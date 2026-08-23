@@ -194,6 +194,16 @@
   }
 
   function openThread(otherId) {
+    // On mobile the thread view replaces the list (see isDesktopMsgLayout
+    // above); without a history entry, the phone's hardware/gesture back
+    // button has nothing to consume for "close thread" and instead leaves
+    // messages.html entirely, skipping the inbox. Push one entry only on
+    // the list->thread transition, and only where that swap actually
+    // happens, so desktop clicks (list+thread always both visible) don't
+    // pile up pointless history entries.
+    if (!isDesktopMsgLayout() && !msgShell.classList.contains("show-thread")) {
+      history.pushState({ msgThread: true }, "");
+    }
     activeOtherId = otherId;
     editingMessageId = null; // switching threads abandons any pending edit in the old one
     threadEmpty.hidden = true;
@@ -563,8 +573,22 @@
   });
   // On mobile, going "back" just switches the pane back to the list —
   // activeOtherId stays set so the thread's data (and its background
-  // polling) keeps up to date, and reopening it is instant.
-  backBtn.addEventListener("click", function () { msgShell.classList.remove("show-thread"); });
+  // polling) keeps up to date, and reopening it is instant. Routed through
+  // history.back() (not a direct class removal) so the in-app button and
+  // the phone's real back button consume the same history entry pushed in
+  // openThread() instead of drifting out of sync.
+  backBtn.addEventListener("click", function () {
+    if (!isDesktopMsgLayout() && history.state && history.state.msgThread) {
+      history.back();
+    } else {
+      msgShell.classList.remove("show-thread");
+    }
+  });
+  window.addEventListener("popstate", function (e) {
+    if (!(e.state && e.state.msgThread)) {
+      msgShell.classList.remove("show-thread");
+    }
+  });
 
   loadConversations(function () {
     if (preselectId) {

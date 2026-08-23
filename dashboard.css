@@ -109,7 +109,7 @@ body { background: var(--bg); padding-bottom: 0; }
 @media (min-width: 860px) { .nav-search-wrap { margin-left: 0; } }
 .nav-bell-btn {
   position: relative; display: flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border-radius: 50%; background: none; border: none;
+  width: 44px; height: 44px; border-radius: 50%; background: none; border: none;
   color: rgba(255,255,255,0.85); cursor: pointer;
 }
 .nav-bell-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
@@ -234,6 +234,12 @@ body { background: var(--bg); padding-bottom: 0; }
    reordering needed, just DOM order the single-column case already
    wants for its own reasons. */
 .db-grid3 { margin-top: 24px; display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+/* Grid items default to min-width:auto, i.e. the min-content width of
+   everything nested inside them — one long unbroken word anywhere in
+   the left/center/right column is enough to force that whole 1fr track
+   wider than the viewport, blowing out the page on mobile. min-width:0
+   lets the tracks actually shrink to the viewport instead. */
+.db-grid3 > * { min-width: 0; }
 .db-section-h { margin: 0 0 16px; font-size: 15.5px; font-weight: 700; color: var(--ink); }
 .db-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
