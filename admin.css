@@ -68,6 +68,30 @@ body { background: var(--bg); }
 
 @media (max-width: 640px) {
   .ad-nav-tag { display: none; }
-  .ad-table th:nth-child(5), .ad-table td:nth-child(5) { display: none; }
+  /* Consent (4th) and Last login (6th) — added after this rule was
+     first written for a 6-column table, so it was silently hiding
+     "Last active" (whatever ended up 5th) instead of the intended
+     "Last login" once Consent shifted every later column over by one. */
+  .ad-table th:nth-child(4), .ad-table td:nth-child(4),
+  .ad-table th:nth-child(6), .ad-table td:nth-child(6) { display: none; }
   .pf-form-row { grid-template-columns: 1fr; }
 }
+
+.ad-recipient-mode { display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.ad-recipient-mode label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.ad-recipient-mode input { width: 18px; height: 18px; }
+.ad-recip-list { max-height: 220px; overflow-y: auto; border: 1.5px solid var(--border); border-radius: 10px; padding: 6px; }
+.ad-recip-row { display: flex; align-items: center; gap: 10px; padding: 8px; font-size: 13.5px; color: var(--ink); cursor: pointer; border-radius: 6px; }
+.ad-recip-row:hover { background: var(--surface-sunken); }
+.ad-recip-row input { width: 18px; height: 18px; flex-shrink: 0; }
+.ad-recip-email { margin-left: auto; font-size: 12px; color: var(--ink-muted); }
+
+/* admin.html doesn't load profile.css (where .pf-form-textarea normally
+   lives) — same look, defined locally instead of pulling in a whole
+   extra stylesheet for one class. */
+.pf-form-textarea {
+  width: 100%; font-family: var(--font-body); font-size: 14px;
+  padding: 11px 14px; border-radius: 10px; border: 1.5px solid var(--border);
+  background: var(--bg); color: var(--ink); resize: vertical; box-sizing: border-box;
+}
+.pf-form-textarea:focus { border-color: var(--red-600); box-shadow: 0 0 0 3px var(--red-100); outline: none; }

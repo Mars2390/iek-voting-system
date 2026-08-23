@@ -183,6 +183,7 @@
     // score with nothing telling the member to go fill them in).
     var e = state.engineer;
     var checks = [
+      [!e.email, "Add your email address", "#pf-contact-edit-btn"],
       [!e.bio, "Write a short bio", "#pf-about-edit-btn"],
       [!e.title, "Add your job title", "#pf-details-edit-btn"],
       [!e.company, "Add your company", "#pf-details-edit-btn"],

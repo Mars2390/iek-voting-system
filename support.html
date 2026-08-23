@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="/theme-init.js"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<link rel="icon" href="/favicon.ico" sizes="48x48" />
+<link rel="icon" href="/images/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/images/icon-180.png" />
+<link rel="manifest" href="/site.webmanifest" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>Support — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="support.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active=""></div>
+
+<main class="hub-main hub-page" style="max-width: 680px;">
+  <h1 style="font-family:var(--font-display);font-weight:800;font-size:22px;margin:0 0 6px;">Support</h1>
+  <p style="font-size:14px;color:var(--ink-muted);margin:0 0 20px;">
+    Questions, problems, or feedback about Engineer Hub? Send a message to the National Engineering Strategy Secretariat below.
+  </p>
+
+  <section class="hub-card" style="margin-bottom:20px;">
+    <h2 style="margin:0 0 14px;font-size:15.5px;">Send a message</h2>
+    <form id="sup-form">
+      <label class="lg-field"><span>Subject</span><input type="text" id="sup-subject" maxlength="255" required /></label>
+      <label class="lg-field"><span>Message</span><textarea id="sup-message" rows="5" class="pf-form-textarea" maxlength="5000" required></textarea></label>
+      <div id="sup-error" class="lg-error" hidden></div>
+      <button type="submit" id="sup-submit" class="eh-btn eh-btn-primary" style="min-height:50px;font-size:15px;">Send message</button>
+    </form>
+  </section>
+
+  <section class="hub-card">
+    <h2 style="margin:0 0 14px;font-size:15.5px;">Your messages</h2>
+    <div id="sup-list"><div class="hub-loading">Loading…</div></div>
+  </section>
+</main>
+
+<div id="app-footer"></div>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="app-footer.js"></script>
+<script src="support.js"></script>
+</body>
+</html>

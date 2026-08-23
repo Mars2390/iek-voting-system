@@ -149,7 +149,112 @@
       <button id="ad-loadmore" class="eh-btn eh-btn-ghost-light hub-btn-sm" hidden>Load more</button>
     </div>
   </section>
+
+  <section class="ad-card">
+    <h2 style="margin-bottom:14px;">Email — NES@engineerhuub.com</h2>
+    <div class="hub-tabs">
+      <button class="hub-tab is-active" data-emailtab="send">Send email</button>
+      <button class="hub-tab" data-emailtab="templates">Templates</button>
+      <button class="hub-tab" data-emailtab="logs">Logs</button>
+    </div>
+
+    <div id="ad-email-send-panel">
+      <form id="ad-email-form" class="ad-add-form" style="flex-direction:column;align-items:stretch;gap:14px;">
+        <div class="lg-field">
+          <span>Recipients</span>
+          <div class="ad-recipient-mode">
+            <label><input type="radio" name="ad-recip-mode" value="all" checked /> All engineers with an email (<span id="ad-recip-all-count">0</span>)</label>
+            <label><input type="radio" name="ad-recip-mode" value="discipline" /> By discipline</label>
+            <label><input type="radio" name="ad-recip-mode" value="company" /> By company</label>
+            <label><input type="radio" name="ad-recip-mode" value="individual" /> Choose individually</label>
+          </div>
+        </div>
+        <label class="lg-field" id="ad-recip-discipline-group" hidden>
+          <span>Discipline</span>
+          <select id="ad-recip-discipline"></select>
+        </label>
+        <label class="lg-field" id="ad-recip-company-group" hidden>
+          <span>Company</span>
+          <select id="ad-recip-company"></select>
+        </label>
+        <div id="ad-recip-individual-group" class="lg-field" hidden>
+          <span>Engineers</span>
+          <input type="text" id="ad-recip-search" placeholder="Search by name…" style="margin-bottom:8px;" />
+          <div id="ad-recip-list" class="ad-recip-list"></div>
+          <small><span id="ad-recip-selected-count">0</span> selected</small>
+        </div>
+
+        <label class="lg-field"><span>Template (optional)</span>
+          <select id="ad-email-template-select"><option value="">— Write from scratch —</option></select>
+        </label>
+        <label class="lg-field"><span>Subject</span><input type="text" id="ad-email-subject" maxlength="255" required /></label>
+        <label class="lg-field">
+          <span>Message</span>
+          <textarea id="ad-email-body" rows="8" class="pf-form-textarea" required></textarea>
+          <small>Use {{name}} to insert each engineer's name.</small>
+        </label>
+        <div id="ad-email-error" class="lg-error" hidden></div>
+        <div id="ad-email-result" class="ad-import-result" hidden></div>
+        <button type="submit" id="ad-email-send-btn" class="eh-btn eh-btn-primary" style="align-self:flex-start;min-height:50px;font-size:15px;">Send email</button>
+      </form>
+    </div>
+
+    <div id="ad-email-templates-panel" hidden>
+      <form id="ad-template-form" class="ad-add-form" style="flex-direction:column;align-items:stretch;gap:14px;">
+        <input type="hidden" id="ad-template-id" />
+        <label class="lg-field"><span>Template name</span><input type="text" id="ad-template-name" maxlength="100" required /></label>
+        <label class="lg-field"><span>Subject</span><input type="text" id="ad-template-subject" maxlength="255" required /></label>
+        <label class="lg-field"><span>Body</span><textarea id="ad-template-body" rows="6" class="pf-form-textarea" required></textarea></label>
+        <div id="ad-template-error" class="lg-error" hidden></div>
+        <div style="display:flex;gap:10px;">
+          <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save as new template</button>
+          <button type="button" id="ad-template-clear" class="eh-btn eh-btn-ghost-light hub-btn-sm">Clear</button>
+        </div>
+      </form>
+      <div class="ad-divider"></div>
+      <div id="ad-template-list" class="hub-list"></div>
+    </div>
+
+    <div id="ad-email-logs-panel" hidden>
+      <div class="ad-table-wrap">
+        <table class="ad-table">
+          <thead><tr><th>Subject</th><th>Template</th><th>Recipients</th><th>Status</th><th>Sent</th></tr></thead>
+          <tbody id="ad-log-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="ad-card">
+    <div class="ad-table-head">
+      <h2>Support inbox</h2>
+      <select id="ad-support-filter">
+        <option value="">All statuses</option>
+        <option value="pending">Pending only</option>
+        <option value="resolved">Replied only</option>
+      </select>
+    </div>
+    <div id="ad-support-list" class="hub-list"></div>
+  </section>
 </main>
+
+<div id="ad-support-reply-overlay" class="hub-modal-overlay" hidden>
+  <div class="hub-modal">
+    <div class="hub-modal-head"><h3>Reply to support message</h3><button type="button" id="ad-support-reply-close" class="hub-modal-close">&times;</button></div>
+    <div class="hub-modal-body" style="padding:18px 20px;">
+      <p id="ad-support-reply-original" style="font-size:13.5px;color:var(--ink-muted);white-space:pre-line;margin:0 0 14px;"></p>
+      <form id="ad-support-reply-form">
+        <input type="hidden" id="ad-support-reply-id" />
+        <label class="lg-field"><span>Your reply</span><textarea id="ad-support-reply-text" rows="5" class="pf-form-textarea" required></textarea></label>
+        <div id="ad-support-reply-error" class="lg-error" hidden></div>
+        <div class="ad-edit-actions">
+          <button type="button" id="ad-support-reply-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm">Cancel</button>
+          <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Send reply</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <div id="ad-edit-overlay" class="hub-modal-overlay" hidden>
   <div class="hub-modal">

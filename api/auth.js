@@ -2,6 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getSql } from "./_db.js";
 import { applyCors, sendError } from "./_utils.js";
+import { sendBulkEmail, sendSingleEmail } from "./_email.js";
 
 // The Engineer Hub member API. One file, many `?action=` values — NOT
 // split into more files because this project sits at the Vercel Hobby
@@ -9,10 +10,13 @@ import { applyCors, sendError } from "./_utils.js";
 // Splitting this further would silently 404 the newest endpoints with
 // no build error, exactly as documented there.
 //
-// Actions: login, logout, me, update-profile, upload-photo,
-// work-experience, education, skills, directory, connections, follows,
-// feed, jobs, profile, dashboard, toggle-open-to-work, conversations,
-// messages, admin-login, admin-logout, admin-me, admin-engineers, admin-import.
+// Actions: login, logout, me, update-profile, consent, save-email,
+// support, upload-photo, work-experience, education, skills, directory,
+// connections, follows, feed, jobs, profile, dashboard,
+// toggle-open-to-work, conversations, messages, admin-login,
+// admin-logout, admin-me, admin-engineers, admin-import,
+// admin-email-recipients, admin-send-email, admin-email-logs,
+// admin-email-templates, admin-support, admin-support-reply.
 //
 // A membership number is not a secret — it's a lookup key, not a
 // credential — so login also requires a PIN the member sets on their
@@ -230,8 +234,26 @@ async function notify(sql, recipientId, actorId, type, targetType, targetId) {
 // disagreed (e.g. company/location/discipline counted toward the score
 // with nothing telling the member to fill them in). One list now drives
 // both, with a jump-to anchor for anything editable from the profile page.
+// event_at is a naive wall-clock value with no timezone marker (see the
+// long comment on the `events` action) — formatting it for the
+// invitation email has to stay a plain string operation, the same as
+// TO_CHAR does for the API response, instead of round-tripping through
+// `new Date(...)`, which would silently reinterpret it in whatever
+// timezone this function happens to run in.
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function formatWallClockDate(eventAtStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(eventAtStr || ""));
+  if (!m) return String(eventAtStr || "");
+  const [, year, month, day, hour, minute] = m;
+  const h = Number(hour);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${Number(day)} ${MONTH_NAMES[Number(month) - 1]} ${year}, ${h12}:${minute} ${ampm}`;
+}
+
 function computeProfileCompletion(e, counts) {
   const checks = [
+    { done: !!e.email, label: "Add your email address", anchor: "#pf-contact-edit-btn" },
     { done: !!e.bio, label: "Write a short bio", anchor: "#pf-about-edit-btn" },
     { done: !!e.title, label: "Add your job title", anchor: "#pf-details-edit-btn" },
     { done: !!e.company, label: "Add your company", anchor: "#pf-details-edit-btn" },
@@ -267,7 +289,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: "Method not allowed." });
       }
 
-      const { displayName, membershipNumber, pin, consentData, consentMarketing } = req.body || {};
+      const { displayName, membershipNumber, pin, consentData, consentMarketing, email: signupEmail } = req.body || {};
       const digits = digitsOnly(membershipNumber);
       if (!digits) {
         return res.status(400).json({ error: "Enter your membership number." });
@@ -318,11 +340,18 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: "Please accept the Privacy Policy and Terms of Use to continue." });
         }
         const marketingOptIn = !!consentMarketing;
+        // Optional — a mistyped/invalid email shouldn't be able to block
+        // someone from creating their account at all, so this is checked
+        // loosely and just skipped (not rejected) if it doesn't look like
+        // an email, same spirit as the rest of this step being kept to
+        // the bare minimum needed to activate the account.
+        const cleanEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(signupEmail || "").trim()) ? String(signupEmail).trim().slice(0, 150) : null;
         await sql`
           UPDATE engineers SET pin_hash = ${hashPin(pin)}, pin_set_at = CURRENT_TIMESTAMP, failed_pin_attempts = 0,
             consent_data_at = CURRENT_TIMESTAMP,
             consent_marketing = ${marketingOptIn},
-            consent_marketing_at = ${marketingOptIn ? new Date() : null}
+            consent_marketing_at = ${marketingOptIn ? new Date() : null},
+            email = COALESCE(${cleanEmail}, email)
           WHERE id = ${engineer.id}
         `;
       } else {
@@ -459,6 +488,65 @@ export default async function handler(req, res) {
         RETURNING *
       `;
       return res.status(200).json({ engineer: privateEngineer(updated) });
+    }
+
+    // Also separate from update-profile for the same reason as `consent`
+    // above — used by the one-field "add your email" prompts (first
+    // login, dashboard/profile nudge) that shouldn't risk blanking the
+    // rest of the profile if they're ever called without every field.
+    if (action === "save-email") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const email = String((req.body || {}).email || "").trim().slice(0, 150);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: "Enter a valid email address." });
+      }
+      const [updated] = await sql`
+        UPDATE engineers SET email = ${email}, updated_at = CURRENT_TIMESTAMP WHERE id = ${session.id} RETURNING *
+      `;
+      return res.status(200).json({ engineer: privateEngineer(updated) });
+    }
+
+    // =========================================================
+    // SUPPORT — engineer <-> admin messages. Engineers only ever see
+    // and create their own; admins see everyone's (admin-support*
+    // actions, grouped with the other admin-* actions further down).
+    // =========================================================
+    if (action === "support") {
+      if (req.method === "GET") {
+        const session = await requireSession(sql, req, res);
+        if (!session) return;
+        const rows = await sql`
+          SELECT id, subject, message, status, admin_reply, replied_at, created_at, updated_at
+          FROM support_messages WHERE engineer_id = ${session.id} ORDER BY created_at DESC
+        `;
+        return res.status(200).json({
+          messages: rows.map((m) => ({
+            id: m.id, subject: m.subject, message: m.message, status: m.status,
+            adminReply: m.admin_reply, repliedAt: m.replied_at, createdAt: m.created_at, updatedAt: m.updated_at,
+          })),
+        });
+      }
+      if (req.method === "POST") {
+        const session = await requireSession(sql, req, res);
+        if (!session) return;
+        const b = req.body || {};
+        const subject = String(b.subject || "").trim().slice(0, 255);
+        const message = String(b.message || "").trim().slice(0, 5000);
+        if (!subject || !message) return res.status(400).json({ error: "Add a subject and a message." });
+        const [created] = await sql`
+          INSERT INTO support_messages (engineer_id, subject, message) VALUES (${session.id}, ${subject}, ${message}) RETURNING *
+        `;
+        return res.status(201).json({
+          message: { id: created.id, subject: created.subject, message: created.message, status: created.status, createdAt: created.created_at },
+        });
+      }
+      res.setHeader("Allow", "GET, POST, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
     }
 
     if (action === "upload-photo") {
@@ -977,6 +1065,37 @@ export default async function handler(req, res) {
           INSERT INTO notifications (recipient_id, actor_id, type, target_type, target_id)
           SELECT id, NULL, 'event', 'event', ${row.id} FROM engineers
         `;
+        // Email broadcast is best-effort and never blocks the event from
+        // being posted — a missing RESEND_API_KEY or a Resend outage
+        // shouldn't stop the admin from getting the event onto the
+        // Calendar (and its in-app notification) which is the part every
+        // member sees regardless of whether they have an email on file.
+        try {
+          const [tpl] = await sql`SELECT subject, body FROM email_templates WHERE name = 'IEK Event Invitation' AND is_builtin = TRUE`;
+          const recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE email IS NOT NULL AND email != ''`;
+          if (tpl && recipients.length) {
+            const recipientList = recipients.map((r) => ({ id: r.id, name: r.display_name || r.name, email: r.email }));
+            const eventDateStr = formatWallClockDate(row.event_at_str);
+            const results = await sendBulkEmail({
+              recipients: recipientList,
+              subject: tpl.subject,
+              body: tpl.body,
+              extraVars: { event_title: row.title, event_date: eventDateStr, event_location: row.location ? " at " + row.location : "" },
+            });
+            const failed = results.filter((r) => !r.ok);
+            const status = failed.length === 0 ? "sent" : failed.length === results.length ? "failed" : "partial";
+            await sql`
+              INSERT INTO email_logs (sender_admin_email, recipient_ids, recipient_count, failed_count, subject, body, template_name, status, error_summary)
+              VALUES (${admin.email}, ${JSON.stringify(recipientList.map((r) => r.id))}, ${results.length}, ${failed.length}, ${tpl.subject.replace("{{event_title}}", row.title)}, ${tpl.body}, 'IEK Event Invitation', ${status},
+                      ${failed.length ? failed.slice(0, 5).map((f) => f.email + ": " + f.error).join("; ") : null})
+            `;
+          }
+        } catch (err) {
+          await sql`
+            INSERT INTO email_logs (sender_admin_email, recipient_count, failed_count, subject, template_name, status, error_summary)
+            VALUES (${admin.email}, 0, 0, ${row.title}, 'IEK Event Invitation', 'failed', ${err.message || String(err)})
+          `;
+        }
         return res.status(201).json({
           event: {
             id: row.id,
@@ -2039,6 +2158,201 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed." });
     }
 
+    // =========================================================
+    // ADMIN EMAIL — bulk sends from NES@engineerhuub.com via Resend
+    // (api/_email.js), template library, and a send history. See also
+    // the `save-email`/`support` actions above (the engineer-facing
+    // half of this system).
+    // =========================================================
+    if (action === "admin-email-recipients") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      const [rows, disciplines, companies] = await Promise.all([
+        sql`SELECT id, display_name, name, email, discipline, company FROM engineers WHERE email IS NOT NULL AND email != '' ORDER BY display_name NULLS LAST, name`,
+        sql`SELECT DISTINCT discipline FROM engineers WHERE discipline IS NOT NULL AND email IS NOT NULL AND email != '' ORDER BY discipline`,
+        sql`SELECT DISTINCT company FROM engineers WHERE company IS NOT NULL AND email IS NOT NULL AND email != '' ORDER BY company`,
+      ]);
+      return res.status(200).json({
+        engineers: rows.map((e) => ({ id: e.id, name: e.display_name || e.name, email: e.email, discipline: e.discipline, company: e.company })),
+        disciplines: disciplines.map((d) => d.discipline),
+        companies: companies.map((c) => c.company),
+      });
+    }
+
+    if (action === "admin-send-email") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      const b = req.body || {};
+      const subject = String(b.subject || "").trim().slice(0, 255);
+      const body = String(b.body || "").trim().slice(0, 20000);
+      if (!subject || !body) return res.status(400).json({ error: "Add a subject and a message." });
+
+      let recipients;
+      if (Array.isArray(b.recipientIds) && b.recipientIds.length) {
+        const ids = b.recipientIds.map(Number).filter(Boolean);
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE id = ANY(${ids}) AND email IS NOT NULL AND email != ''`;
+      } else if (b.filterDiscipline) {
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE discipline = ${b.filterDiscipline} AND email IS NOT NULL AND email != ''`;
+      } else if (b.filterCompany) {
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE company = ${b.filterCompany} AND email IS NOT NULL AND email != ''`;
+      } else if (b.all) {
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE email IS NOT NULL AND email != ''`;
+      } else {
+        return res.status(400).json({ error: "Choose at least one recipient." });
+      }
+      if (!recipients.length) return res.status(400).json({ error: "No matching engineers have an email address on file." });
+      if (recipients.length > 1000) return res.status(400).json({ error: "That's more than 1000 recipients in one send — narrow the filter." });
+
+      const recipientList = recipients.map((r) => ({ id: r.id, name: r.display_name || r.name, email: r.email }));
+      let results;
+      let topLevelError = null;
+      try {
+        results = await sendBulkEmail({ recipients: recipientList, subject, body });
+      } catch (err) {
+        topLevelError = err.message || String(err);
+        results = recipientList.map((r) => ({ engineerId: r.id, email: r.email, ok: false, error: topLevelError }));
+      }
+      const failed = results.filter((r) => !r.ok);
+      const status = failed.length === 0 ? "sent" : failed.length === results.length ? "failed" : "partial";
+      await sql`
+        INSERT INTO email_logs (sender_admin_email, recipient_ids, recipient_count, failed_count, subject, body, template_name, status, error_summary)
+        VALUES (${admin.email}, ${JSON.stringify(recipientList.map((r) => r.id))}, ${results.length}, ${failed.length}, ${subject}, ${body}, ${b.templateName || null}, ${status},
+                ${topLevelError || (failed.length ? failed.slice(0, 5).map((f) => f.email + ": " + f.error).join("; ") : null)})
+      `;
+      if (topLevelError) return res.status(502).json({ error: "Couldn't send: " + topLevelError, sentCount: 0, failedCount: results.length });
+      return res.status(200).json({ sentCount: results.length - failed.length, failedCount: failed.length, status });
+    }
+
+    if (action === "admin-email-logs") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      const limit = Math.min(Number(req.query.limit) || 50, 200);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const rows = await sql`
+        SELECT id, sender_admin_email, recipient_count, failed_count, subject, template_name, status, error_summary, sent_at
+        FROM email_logs ORDER BY sent_at DESC LIMIT ${limit} OFFSET ${offset}
+      `;
+      return res.status(200).json({
+        logs: rows.map((l) => ({
+          id: l.id, senderAdminEmail: l.sender_admin_email, recipientCount: l.recipient_count, failedCount: l.failed_count,
+          subject: l.subject, templateName: l.template_name, status: l.status, errorSummary: l.error_summary, sentAt: l.sent_at,
+        })),
+      });
+    }
+
+    if (action === "admin-email-templates") {
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+
+      if (req.method === "GET") {
+        const rows = await sql`SELECT id, name, subject, body, is_builtin, created_at FROM email_templates ORDER BY is_builtin DESC, created_at`;
+        return res.status(200).json({
+          templates: rows.map((t) => ({ id: t.id, name: t.name, subject: t.subject, body: t.body, isBuiltin: t.is_builtin, createdAt: t.created_at })),
+        });
+      }
+      if (req.method === "POST") {
+        const b = req.body || {};
+        const name = String(b.name || "").trim().slice(0, 100);
+        const subject = String(b.subject || "").trim().slice(0, 255);
+        const body = String(b.body || "").trim().slice(0, 20000);
+        if (!name || !subject || !body) return res.status(400).json({ error: "Add a name, subject, and message body." });
+        if (b.id) {
+          const [existing] = await sql`SELECT is_builtin FROM email_templates WHERE id = ${Number(b.id)}`;
+          if (!existing) return res.status(404).json({ error: "Template not found." });
+          if (existing.is_builtin) return res.status(400).json({ error: "Built-in templates can't be edited — save your changes as a new template instead." });
+          const [updated] = await sql`UPDATE email_templates SET name = ${name}, subject = ${subject}, body = ${body} WHERE id = ${Number(b.id)} RETURNING *`;
+          return res.status(200).json({ template: { id: updated.id, name: updated.name, subject: updated.subject, body: updated.body, isBuiltin: updated.is_builtin } });
+        }
+        const [created] = await sql`INSERT INTO email_templates (name, subject, body, is_builtin) VALUES (${name}, ${subject}, ${body}, FALSE) RETURNING *`;
+        return res.status(201).json({ template: { id: created.id, name: created.name, subject: created.subject, body: created.body, isBuiltin: created.is_builtin } });
+      }
+      if (req.method === "DELETE") {
+        const id = Number(req.query.id);
+        if (!id) return res.status(400).json({ error: "Missing template id." });
+        const [existing] = await sql`SELECT is_builtin FROM email_templates WHERE id = ${id}`;
+        if (!existing) return res.status(404).json({ error: "Template not found." });
+        if (existing.is_builtin) return res.status(400).json({ error: "Built-in templates can't be deleted." });
+        await sql`DELETE FROM email_templates WHERE id = ${id}`;
+        return res.status(200).json({ success: true });
+      }
+      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    if (action === "admin-support") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      const status = String(req.query.status || "").trim();
+      const rows = await sql`
+        SELECT sm.id, sm.subject, sm.message, sm.status, sm.admin_reply, sm.replied_by, sm.replied_at, sm.created_at,
+               e.id AS engineer_id, e.display_name, e.name, e.iek_number, e.email
+        FROM support_messages sm JOIN engineers e ON e.id = sm.engineer_id
+        WHERE (${status}::text = '' OR sm.status = ${status})
+        ORDER BY (sm.status = 'pending') DESC, sm.created_at DESC
+      `;
+      return res.status(200).json({
+        messages: rows.map((m) => ({
+          id: m.id, subject: m.subject, message: m.message, status: m.status, adminReply: m.admin_reply,
+          repliedBy: m.replied_by, repliedAt: m.replied_at, createdAt: m.created_at,
+          engineer: { id: m.engineer_id, name: m.display_name || m.name, iekNumber: m.iek_number, email: m.email },
+        })),
+      });
+    }
+
+    if (action === "admin-support-reply") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+      const b = req.body || {};
+      const id = Number(b.id);
+      const reply = String(b.reply || "").trim().slice(0, 5000);
+      if (!id || !reply) return res.status(400).json({ error: "Write a reply." });
+      const [updated] = await sql`
+        UPDATE support_messages
+        SET admin_reply = ${reply}, status = 'resolved', replied_by = ${admin.email}, replied_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+        RETURNING *
+      `;
+      if (!updated) return res.status(404).json({ error: "Support message not found." });
+      const [engineer] = await sql`SELECT display_name, name, email FROM engineers WHERE id = ${updated.engineer_id}`;
+      // Best-effort — a member with no email on file, or a Resend hiccup,
+      // shouldn't stop the reply from saving; they'll still see it next
+      // time they open Support.
+      if (engineer && engineer.email) {
+        try {
+          await sendSingleEmail({
+            to: engineer.email,
+            subject: "Re: " + updated.subject,
+            body: "Hi " + (engineer.display_name || engineer.name) + ",\n\n" + reply + "\n\n— National Engineering Strategy Secretariat",
+          });
+        } catch (err) {
+          // Swallowed on purpose (see comment above).
+        }
+      }
+      return res.status(200).json({
+        message: { id: updated.id, subject: updated.subject, status: updated.status, adminReply: updated.admin_reply, repliedAt: updated.replied_at },
+      });
+    }
+
     if (action === "admin-import") {
       if (req.method !== "POST") {
         res.setHeader("Allow", "POST, OPTIONS");
@@ -2115,7 +2429,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, save-email, support, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import, admin-email-recipients, admin-send-email, admin-email-logs, admin-email-templates, admin-support, admin-support-reply.",
     });
   } catch (err) {
     return sendError(res, err);

@@ -359,7 +359,271 @@
       });
   });
 
+  // ---------- Email ----------
+  var emailTabs = document.querySelectorAll("[data-emailtab]");
+  var emailPanels = {
+    send: document.getElementById("ad-email-send-panel"),
+    templates: document.getElementById("ad-email-templates-panel"),
+    logs: document.getElementById("ad-email-logs-panel"),
+  };
+  emailTabs.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      emailTabs.forEach(function (b) { b.classList.toggle("is-active", b === btn); });
+      var key = btn.dataset.emailtab;
+      Object.keys(emailPanels).forEach(function (k) { emailPanels[k].hidden = k !== key; });
+      if (key === "logs") loadEmailLogs();
+      if (key === "templates") loadTemplates();
+    });
+  });
+
+  var allRecipients = [];
+  function loadRecipients() {
+    adminApi("admin-email-recipients").then(function (d) {
+      allRecipients = d.engineers;
+      document.getElementById("ad-recip-all-count").textContent = d.engineers.length;
+      var discSel = document.getElementById("ad-recip-discipline");
+      discSel.innerHTML = d.disciplines.map(function (x) { return '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + "</option>"; }).join("");
+      var compSel = document.getElementById("ad-recip-company");
+      compSel.innerHTML = d.companies.map(function (x) { return '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + "</option>"; }).join("");
+      renderRecipientList("");
+    });
+  }
+
+  var selectedRecipientIds = {};
+  function renderRecipientList(q) {
+    var listEl = document.getElementById("ad-recip-list");
+    var filtered = q ? allRecipients.filter(function (r) { return r.name.toLowerCase().indexOf(q.toLowerCase()) !== -1; }) : allRecipients;
+    listEl.innerHTML = filtered
+      .map(function (r) {
+        return (
+          '<label class="ad-recip-row"><input type="checkbox" value="' + r.id + '" ' + (selectedRecipientIds[r.id] ? "checked" : "") + " />" +
+          escapeHtml(r.name) + '<span class="ad-recip-email">' + escapeHtml(r.email) + "</span></label>"
+        );
+      })
+      .join("") || '<div class="hub-empty">No matches.</div>';
+    listEl.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        if (cb.checked) selectedRecipientIds[cb.value] = true;
+        else delete selectedRecipientIds[cb.value];
+        document.getElementById("ad-recip-selected-count").textContent = Object.keys(selectedRecipientIds).length;
+      });
+    });
+  }
+  document.getElementById("ad-recip-search").addEventListener("input", function (e) { renderRecipientList(e.target.value.trim()); });
+
+  document.querySelectorAll('input[name="ad-recip-mode"]').forEach(function (radio) {
+    radio.addEventListener("change", function () {
+      var mode = radio.value;
+      document.getElementById("ad-recip-discipline-group").hidden = mode !== "discipline";
+      document.getElementById("ad-recip-company-group").hidden = mode !== "company";
+      document.getElementById("ad-recip-individual-group").hidden = mode !== "individual";
+    });
+  });
+
+  var allTemplates = [];
+  function loadTemplates() {
+    adminApi("admin-email-templates").then(function (d) {
+      allTemplates = d.templates;
+      var sel = document.getElementById("ad-email-template-select");
+      sel.innerHTML = '<option value="">— Write from scratch —</option>' +
+        d.templates.map(function (t) { return '<option value="' + t.id + '">' + escapeHtml(t.name) + (t.isBuiltin ? "" : " (custom)") + "</option>"; }).join("");
+
+      var listEl = document.getElementById("ad-template-list");
+      listEl.innerHTML = d.templates
+        .map(function (t) {
+          return (
+            '<div class="hub-feed-item">' +
+            "<div><p><strong>" + escapeHtml(t.name) + "</strong>" + (t.isBuiltin ? ' <span class="ad-recip-email">(built-in)</span>' : "") + "</p>" +
+            "<time>" + escapeHtml(t.subject) + "</time></div>" +
+            '<div style="margin-left:auto;display:flex;gap:10px;">' +
+            '<button type="button" class="ad-edit-btn" data-use-template="' + t.id + '">Use</button>' +
+            (t.isBuiltin ? "" : '<button type="button" class="ad-edit-btn" data-delete-template="' + t.id + '" style="color:var(--red-600);">Delete</button>') +
+            "</div></div>"
+          );
+        })
+        .join("") || '<div class="hub-empty">No templates yet.</div>';
+
+      listEl.querySelectorAll("[data-use-template]").forEach(function (btn) {
+        btn.addEventListener("click", function () { applyTemplateToSendForm(Number(btn.dataset.useTemplate)); switchToSendTab(); });
+      });
+      listEl.querySelectorAll("[data-delete-template]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          window.Hub.confirm({ title: "Delete template?", message: "This can't be undone." }).then(function (ok) {
+            if (!ok) return;
+            adminApi("admin-email-templates", { method: "DELETE", query: { id: btn.dataset.deleteTemplate } })
+              .then(function () { toast("Template deleted"); loadTemplates(); })
+              .catch(function (err) { toast(err.message, true); });
+          });
+        });
+      });
+    });
+  }
+  function switchToSendTab() {
+    emailTabs.forEach(function (b) { b.classList.toggle("is-active", b.dataset.emailtab === "send"); });
+    Object.keys(emailPanels).forEach(function (k) { emailPanels[k].hidden = k !== "send"; });
+  }
+  function applyTemplateToSendForm(id) {
+    var t = allTemplates.find(function (x) { return x.id === id; });
+    if (!t) return;
+    document.getElementById("ad-email-template-select").value = id;
+    document.getElementById("ad-email-subject").value = t.subject;
+    document.getElementById("ad-email-body").value = t.body;
+  }
+  document.getElementById("ad-email-template-select").addEventListener("change", function (e) {
+    if (e.target.value) applyTemplateToSendForm(Number(e.target.value));
+  });
+
+  document.getElementById("ad-template-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var errBox = document.getElementById("ad-template-error");
+    errBox.hidden = true;
+    var idVal = document.getElementById("ad-template-id").value;
+    var body = {
+      name: document.getElementById("ad-template-name").value.trim(),
+      subject: document.getElementById("ad-template-subject").value.trim(),
+      body: document.getElementById("ad-template-body").value.trim(),
+    };
+    if (idVal) body.id = Number(idVal);
+    adminApi("admin-email-templates", { method: "POST", body: body })
+      .then(function () {
+        toast("Template saved");
+        document.getElementById("ad-template-form").reset();
+        document.getElementById("ad-template-id").value = "";
+        loadTemplates();
+      })
+      .catch(function (err) { errBox.textContent = err.message; errBox.hidden = false; });
+  });
+  document.getElementById("ad-template-clear").addEventListener("click", function () {
+    document.getElementById("ad-template-form").reset();
+    document.getElementById("ad-template-id").value = "";
+  });
+
+  document.getElementById("ad-email-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var errBox = document.getElementById("ad-email-error");
+    var resultBox = document.getElementById("ad-email-result");
+    errBox.hidden = true;
+    resultBox.hidden = true;
+
+    var mode = document.querySelector('input[name="ad-recip-mode"]:checked').value;
+    var payload = {
+      subject: document.getElementById("ad-email-subject").value.trim(),
+      body: document.getElementById("ad-email-body").value.trim(),
+    };
+    var templateSel = document.getElementById("ad-email-template-select");
+    if (templateSel.value) {
+      var t = allTemplates.find(function (x) { return x.id === Number(templateSel.value); });
+      if (t) payload.templateName = t.name;
+    }
+    if (mode === "all") payload.all = true;
+    else if (mode === "discipline") payload.filterDiscipline = document.getElementById("ad-recip-discipline").value;
+    else if (mode === "company") payload.filterCompany = document.getElementById("ad-recip-company").value;
+    else if (mode === "individual") {
+      var ids = Object.keys(selectedRecipientIds).map(Number);
+      if (!ids.length) { errBox.textContent = "Select at least one engineer."; errBox.hidden = false; return; }
+      payload.recipientIds = ids;
+    }
+
+    var submitBtn = document.getElementById("ad-email-send-btn");
+    var originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Sending…";
+    adminApi("admin-send-email", { method: "POST", body: payload })
+      .then(function (d) {
+        resultBox.className = "ad-import-result";
+        resultBox.innerHTML = '<div class="summary">Sent to ' + d.sentCount + " engineer" + (d.sentCount === 1 ? "" : "s") + (d.failedCount ? ", " + d.failedCount + " failed" : "") + ".</div>";
+        resultBox.hidden = false;
+        toast("Email sent");
+      })
+      .catch(function (err) {
+        errBox.textContent = err.message;
+        errBox.hidden = false;
+      })
+      .finally(function () {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+      });
+  });
+
+  function loadEmailLogs() {
+    adminApi("admin-email-logs").then(function (d) {
+      var body = document.getElementById("ad-log-table-body");
+      body.innerHTML = d.logs.length
+        ? d.logs
+            .map(function (l) {
+              return (
+                "<tr><td>" + escapeHtml(l.subject || "—") + "</td><td>" + escapeHtml(l.templateName || "—") + "</td>" +
+                "<td>" + l.recipientCount + (l.failedCount ? " (" + l.failedCount + " failed)" : "") + "</td>" +
+                '<td><span class="ad-status-dot' + (l.status === "sent" ? " is-online" : "") + '"><span class="dot"></span>' + escapeHtml(l.status) + "</span></td>" +
+                "<td>" + escapeHtml(timeAgo(l.sentAt)) + "</td></tr>"
+              );
+            })
+            .join("")
+        : '<tr><td colspan="5"><div class="hub-empty">No emails sent yet.</div></td></tr>';
+    });
+  }
+
+  // ---------- Support inbox ----------
+  var supportFilter = document.getElementById("ad-support-filter");
+  var supportReplyOverlay = document.getElementById("ad-support-reply-overlay");
+  var supportReplyForm = document.getElementById("ad-support-reply-form");
+
+  function loadSupport() {
+    var listEl = document.getElementById("ad-support-list");
+    listEl.innerHTML = '<div class="hub-loading">Loading…</div>';
+    adminApi("admin-support", { query: { status: supportFilter.value } }).then(function (d) {
+      listEl.innerHTML = d.messages.length
+        ? d.messages
+            .map(function (m) {
+              return (
+                '<div class="hub-feed-item" style="align-items:flex-start;">' +
+                "<div>" +
+                "<p><strong>" + escapeHtml(m.subject) + "</strong> — " + escapeHtml(m.engineer.name) + " (" + escapeHtml(m.engineer.iekNumber) + ")</p>" +
+                '<time style="display:block;margin-bottom:6px;">' + escapeHtml(timeAgo(m.createdAt)) + "</time>" +
+                "<p style=\"font-size:13px;color:var(--ink);white-space:pre-line;margin:0;\">" + escapeHtml(m.message) + "</p>" +
+                (m.adminReply ? '<p style="font-size:12.5px;color:var(--ink-muted);margin-top:8px;"><strong>Your reply:</strong> ' + escapeHtml(m.adminReply) + "</p>" : "") +
+                "</div>" +
+                (m.status === "pending" ? '<button type="button" class="ad-edit-btn" data-reply="' + m.id + '" style="margin-left:auto;flex-shrink:0;">Reply</button>' : '<span class="ad-status-dot is-online" style="margin-left:auto;flex-shrink:0;"><span class="dot"></span>Replied</span>') +
+                "</div>"
+              );
+            })
+            .join("")
+        : '<div class="hub-empty">No support messages.</div>';
+      listEl.querySelectorAll("[data-reply]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var msg = d.messages.find(function (x) { return x.id === Number(btn.dataset.reply); });
+          document.getElementById("ad-support-reply-id").value = msg.id;
+          document.getElementById("ad-support-reply-original").textContent = msg.subject + "\n\n" + msg.message;
+          document.getElementById("ad-support-reply-text").value = "";
+          document.getElementById("ad-support-reply-error").hidden = true;
+          supportReplyOverlay.hidden = false;
+        });
+      });
+    });
+  }
+  supportFilter.addEventListener("change", loadSupport);
+  document.getElementById("ad-support-reply-close").addEventListener("click", function () { supportReplyOverlay.hidden = true; });
+  document.getElementById("ad-support-reply-cancel").addEventListener("click", function () { supportReplyOverlay.hidden = true; });
+  supportReplyOverlay.addEventListener("click", function (e) { if (e.target === supportReplyOverlay) supportReplyOverlay.hidden = true; });
+  supportReplyForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var errBox = document.getElementById("ad-support-reply-error");
+    errBox.hidden = true;
+    var id = Number(document.getElementById("ad-support-reply-id").value);
+    var reply = document.getElementById("ad-support-reply-text").value.trim();
+    adminApi("admin-support-reply", { method: "POST", body: { id: id, reply: reply } })
+      .then(function () {
+        supportReplyOverlay.hidden = true;
+        toast("Reply sent");
+        loadSupport();
+      })
+      .catch(function (err) { errBox.textContent = err.message; errBox.hidden = false; });
+  });
+
   loadStats();
   loadEngineers(true);
   loadEvents();
+  loadRecipients();
+  loadTemplates();
+  loadSupport();
 })();

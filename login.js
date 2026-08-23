@@ -43,6 +43,8 @@
   var consentGroup = document.getElementById("lg-consent-group");
   var consentDataInput = document.getElementById("lg-consent-data");
   var consentMarketingInput = document.getElementById("lg-consent-marketing");
+  var emailGroup = document.getElementById("lg-email-group");
+  var emailInput = document.getElementById("lg-email");
 
   // "credentials": asking for name + membership number.
   // "setup-pin": account has no PIN yet — this login sets one.
@@ -79,10 +81,12 @@
     pinHint.textContent = "Pick 4-6 digits. Don't share it — this is what protects your account.";
     pinGroup.hidden = false;
     pinConfirmGroup.hidden = false;
+    emailGroup.hidden = false;
     consentGroup.hidden = false;
     submitLabel.textContent = "Create PIN & log in";
     pinInput.value = "";
     pinConfirmInput.value = "";
+    emailInput.value = "";
     consentDataInput.checked = false;
     consentMarketingInput.checked = false;
     // Same field the "enter-pin" step reuses as current-password — a
@@ -102,6 +106,7 @@
     pinHint.textContent = "";
     pinGroup.hidden = false;
     pinConfirmGroup.hidden = true;
+    emailGroup.hidden = true;
     consentGroup.hidden = true;
     submitLabel.textContent = "Log in";
     pinInput.value = "";
@@ -116,6 +121,7 @@
     numberGroup.hidden = false;
     pinGroup.hidden = true;
     pinConfirmGroup.hidden = true;
+    emailGroup.hidden = true;
     consentGroup.hidden = true;
     submitLabel.textContent = "Continue";
   }
@@ -135,6 +141,7 @@
       if (!/^[0-9]{4,6}$/.test(pin)) return showError("PIN must be 4-6 digits.");
       if (pin !== pinConfirmInput.value.trim()) return showError("PINs don't match.");
       if (!consentDataInput.checked) return showError("Please accept the Privacy Policy and Terms of Use to continue.");
+      if (emailInput.value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())) return showError("Enter a valid email address, or leave it blank.");
     } else {
       if (!/^[0-9]{4,6}$/.test(pin)) return showError("Enter your PIN.");
     }
@@ -146,6 +153,7 @@
     if (mode === "setup-pin") {
       body.consentData = consentDataInput.checked;
       body.consentMarketing = consentMarketingInput.checked;
+      if (emailInput.value.trim()) body.email = emailInput.value.trim();
     }
 
     fetch("/api/auth?action=login", {
