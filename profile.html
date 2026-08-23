@@ -185,17 +185,24 @@
           <button id="pf-contact-edit-btn" class="pf-edit-link" type="button" hidden>Edit</button>
         </div>
         <dl id="pf-contact-view" class="pf-contact-list"></dl>
-        <form id="pf-contact-form" hidden>
-          <label class="lg-field"><span>Email</span><input type="email" id="pf-input-email" /></label>
-          <label class="lg-field"><span>LinkedIn URL</span><input type="url" id="pf-input-linkedin" /></label>
-          <label class="lg-field"><span>GitHub URL</span><input type="url" id="pf-input-github" /></label>
-          <label class="lg-field"><span>Portfolio URL</span><input type="url" id="pf-input-portfolio" /></label>
-          <div class="pf-form-actions">
-            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
-            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
-          </div>
-        </form>
       </section>
+
+      <div class="hub-modal-overlay pf-form-modal-overlay" id="pf-contact-modal" hidden>
+        <div class="hub-modal pf-form-modal">
+          <div class="hub-modal-head"><h3>Edit Contact</h3><button type="button" class="hub-modal-close" data-modal-close aria-label="Close">&times;</button></div>
+          <form id="pf-contact-form" class="hub-modal-body pf-form-modal-body" novalidate>
+            <label class="lg-field"><span>Email (required)</span><input type="email" id="pf-input-email" required /></label>
+            <label class="lg-field"><span>LinkedIn URL</span><input type="url" id="pf-input-linkedin" /></label>
+            <label class="lg-field"><span>GitHub URL</span><input type="url" id="pf-input-github" /></label>
+            <label class="lg-field"><span>Portfolio URL</span><input type="url" id="pf-input-portfolio" /></label>
+            <div id="pf-contact-error" class="lg-error" hidden></div>
+            <div class="pf-form-actions">
+              <button type="button" class="eh-btn eh-btn-ghost-light pf-form-btn pf-cancel">Cancel</button>
+              <button type="submit" class="eh-btn eh-btn-save pf-form-btn">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <section class="hub-card pf-section" id="pf-details-card">
         <div class="pf-section-head">
@@ -203,41 +210,6 @@
           <button id="pf-details-edit-btn" class="pf-edit-link" type="button" hidden>Edit</button>
         </div>
         <dl id="pf-details-view" class="pf-contact-list"></dl>
-        <form id="pf-details-form" hidden>
-          <label class="lg-field"><span>Full name</span><input type="text" id="pf-input-name" /></label>
-          <label class="lg-field"><span>Title</span><input type="text" id="pf-input-title" placeholder="e.g. Civil Engineer" /></label>
-          <label class="lg-field">
-            <span>Discipline</span>
-            <select id="pf-input-discipline">
-              <option value="">Select a discipline…</option>
-              <option>Civil Engineering</option>
-              <option>Structural Engineering</option>
-              <option>Electrical Engineering</option>
-              <option>Mechanical Engineering</option>
-              <option>Chemical Engineering</option>
-              <option>Environmental Engineering</option>
-              <option>Water Engineering</option>
-              <option>Geotechnical Engineering</option>
-              <option>Mining Engineering</option>
-              <option>Agricultural & Biosystems Engineering</option>
-              <option>Industrial & Textile Engineering</option>
-              <option>Marine Engineering</option>
-              <option>Aeronautical Engineering</option>
-              <option>Petroleum Engineering</option>
-              <option>Biomedical Engineering</option>
-              <option>Computer / Software Engineering</option>
-              <option>Telecommunication Engineering</option>
-              <option>Other</option>
-            </select>
-          </label>
-          <label class="lg-field"><span>Company</span><input type="text" id="pf-input-company" /></label>
-          <label class="lg-field"><span>Location</span><input type="text" id="pf-input-location" /></label>
-          <label class="lg-field"><span>Years of experience</span><input type="number" id="pf-input-years" min="0" max="70" /></label>
-          <div class="pf-form-actions">
-            <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Save</button>
-            <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm pf-cancel">Cancel</button>
-          </div>
-        </form>
         <div class="pf-otw-toggle-row" id="pf-otw-row" hidden>
           <span>Open to work</span>
           <label class="pf-switch">
@@ -246,6 +218,47 @@
           </label>
         </div>
       </section>
+
+      <div class="hub-modal-overlay pf-form-modal-overlay" id="pf-details-modal" hidden>
+        <div class="hub-modal pf-form-modal">
+          <div class="hub-modal-head"><h3>Edit Details</h3><button type="button" class="hub-modal-close" data-modal-close aria-label="Close">&times;</button></div>
+          <form id="pf-details-form" class="hub-modal-body pf-form-modal-body">
+            <label class="lg-field"><span>Full name</span><input type="text" id="pf-input-name" /></label>
+            <label class="lg-field"><span>Title</span><input type="text" id="pf-input-title" placeholder="e.g. Civil Engineer" /></label>
+            <label class="lg-field">
+              <span>Discipline</span>
+              <select id="pf-input-discipline">
+                <option value="">Select a discipline…</option>
+                <option>Civil Engineering</option>
+                <option>Structural Engineering</option>
+                <option>Electrical Engineering</option>
+                <option>Mechanical Engineering</option>
+                <option>Chemical Engineering</option>
+                <option>Environmental Engineering</option>
+                <option>Water Engineering</option>
+                <option>Geotechnical Engineering</option>
+                <option>Mining Engineering</option>
+                <option>Agricultural & Biosystems Engineering</option>
+                <option>Industrial & Textile Engineering</option>
+                <option>Marine Engineering</option>
+                <option>Aeronautical Engineering</option>
+                <option>Petroleum Engineering</option>
+                <option>Biomedical Engineering</option>
+                <option>Computer / Software Engineering</option>
+                <option>Telecommunication Engineering</option>
+                <option>Other</option>
+              </select>
+            </label>
+            <label class="lg-field"><span>Company</span><input type="text" id="pf-input-company" /></label>
+            <label class="lg-field"><span>Location</span><input type="text" id="pf-input-location" /></label>
+            <label class="lg-field"><span>Years of experience</span><input type="number" id="pf-input-years" min="0" max="70" /></label>
+            <div class="pf-form-actions">
+              <button type="button" class="eh-btn eh-btn-ghost-light pf-form-btn pf-cancel">Cancel</button>
+              <button type="submit" class="eh-btn eh-btn-save pf-form-btn">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </aside>
   </div>
 </main>

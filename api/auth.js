@@ -369,18 +369,25 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: "Please accept the Privacy Policy and Terms of Use to continue." });
         }
         const marketingOptIn = !!consentMarketing;
-        // Optional — a mistyped/invalid email shouldn't be able to block
-        // someone from creating their account at all, so this is checked
-        // loosely and just skipped (not rejected) if it doesn't look like
-        // an email, same spirit as the rest of this step being kept to
-        // the bare minimum needed to activate the account.
-        const cleanEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(signupEmail || "").trim()) ? String(signupEmail).trim().slice(0, 150) : null;
+        // Required — an email is how the platform reaches engineers for
+        // event notices, support replies, and account recovery, so
+        // account activation is gated on having a real-looking one on
+        // file. Re-checked here rather than trusted from the client:
+        // login.js already blocks submission client-side, but that's a
+        // UX convenience, not the actual enforcement.
+        const trimmedEmail = String(signupEmail || "").trim();
+        if (!trimmedEmail) {
+          return res.status(400).json({ error: "Email is required to proceed." });
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+          return res.status(400).json({ error: "Enter a valid email address." });
+        }
         await sql`
           UPDATE engineers SET pin_hash = ${hashPin(pin)}, pin_set_at = CURRENT_TIMESTAMP, failed_pin_attempts = 0,
             consent_data_at = CURRENT_TIMESTAMP,
             consent_marketing = ${marketingOptIn},
             consent_marketing_at = ${marketingOptIn ? new Date() : null},
-            email = COALESCE(${cleanEmail}, email)
+            email = ${trimmedEmail.slice(0, 150)}
           WHERE id = ${engineer.id}
         `;
       } else {

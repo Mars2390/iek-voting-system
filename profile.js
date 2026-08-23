@@ -600,18 +600,32 @@
     document.getElementById("pf-input-linkedin").value = e.linkedinUrl || "";
     document.getElementById("pf-input-github").value = e.githubUrl || "";
     document.getElementById("pf-input-portfolio").value = e.portfolioUrl || "";
-    toggleForm("pf-contact-view", "pf-contact-form", true);
+    document.getElementById("pf-contact-error").hidden = true;
+    openFormModal("pf-contact-modal");
   });
   document.getElementById("pf-contact-form").addEventListener("submit", function (e) {
     e.preventDefault();
+    var errBox = document.getElementById("pf-contact-error");
+    errBox.hidden = true;
+    var email = document.getElementById("pf-input-email").value.trim();
+    if (!email) {
+      errBox.textContent = "Email is required to proceed.";
+      errBox.hidden = false;
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errBox.textContent = "Enter a valid email address.";
+      errBox.hidden = false;
+      return;
+    }
     saveProfileFields(
       {
-        email: document.getElementById("pf-input-email").value.trim(),
+        email: email,
         linkedinUrl: document.getElementById("pf-input-linkedin").value.trim(),
         githubUrl: document.getElementById("pf-input-github").value.trim(),
         portfolioUrl: document.getElementById("pf-input-portfolio").value.trim(),
       },
-      function () { toggleForm("pf-contact-view", "pf-contact-form", false); }
+      function () { closeFormModal("pf-contact-modal"); }
     );
   });
 
@@ -641,7 +655,7 @@
     document.getElementById("pf-input-company").value = e.company || "";
     document.getElementById("pf-input-location").value = e.location || "";
     document.getElementById("pf-input-years").value = e.experienceYears != null ? e.experienceYears : "";
-    toggleForm("pf-details-view", "pf-details-form", true);
+    openFormModal("pf-details-modal");
   });
   document.getElementById("pf-details-form").addEventListener("submit", function (e) {
     e.preventDefault();
@@ -654,7 +668,7 @@
         location: document.getElementById("pf-input-location").value.trim(),
         experienceYears: document.getElementById("pf-input-years").value ? Number(document.getElementById("pf-input-years").value) : null,
       },
-      function () { toggleForm("pf-details-view", "pf-details-form", false); }
+      function () { closeFormModal("pf-details-modal"); }
     );
   });
 

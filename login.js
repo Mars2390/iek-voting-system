@@ -140,8 +140,9 @@
     } else if (mode === "setup-pin") {
       if (!/^[0-9]{4,6}$/.test(pin)) return showError("PIN must be 4-6 digits.");
       if (pin !== pinConfirmInput.value.trim()) return showError("PINs don't match.");
+      if (!emailInput.value.trim()) return showError("Email is required to proceed.");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())) return showError("Enter a valid email address.");
       if (!consentDataInput.checked) return showError("Please accept the Privacy Policy and Terms of Use to continue.");
-      if (emailInput.value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())) return showError("Enter a valid email address, or leave it blank.");
     } else {
       if (!/^[0-9]{4,6}$/.test(pin)) return showError("Enter your PIN.");
     }
