@@ -40,6 +40,9 @@
   var pinInput = document.getElementById("lg-pin");
   var pinConfirmGroup = document.getElementById("lg-pin-confirm-group");
   var pinConfirmInput = document.getElementById("lg-pin-confirm");
+  var consentGroup = document.getElementById("lg-consent-group");
+  var consentDataInput = document.getElementById("lg-consent-data");
+  var consentMarketingInput = document.getElementById("lg-consent-marketing");
 
   // "credentials": asking for name + membership number.
   // "setup-pin": account has no PIN yet — this login sets one.
@@ -76,9 +79,12 @@
     pinHint.textContent = "Pick 4-6 digits. Don't share it — this is what protects your account.";
     pinGroup.hidden = false;
     pinConfirmGroup.hidden = false;
+    consentGroup.hidden = false;
     submitLabel.textContent = "Create PIN & log in";
     pinInput.value = "";
     pinConfirmInput.value = "";
+    consentDataInput.checked = false;
+    consentMarketingInput.checked = false;
     // Same field the "enter-pin" step reuses as current-password — a
     // browser autofill dropdown offering an old PIN while setting a new
     // one would be actively wrong here, so this only applies for the
@@ -96,6 +102,7 @@
     pinHint.textContent = "";
     pinGroup.hidden = false;
     pinConfirmGroup.hidden = true;
+    consentGroup.hidden = true;
     submitLabel.textContent = "Log in";
     pinInput.value = "";
     pinInput.autocomplete = "current-password";
@@ -109,6 +116,7 @@
     numberGroup.hidden = false;
     pinGroup.hidden = true;
     pinConfirmGroup.hidden = true;
+    consentGroup.hidden = true;
     submitLabel.textContent = "Continue";
   }
 
@@ -126,6 +134,7 @@
     } else if (mode === "setup-pin") {
       if (!/^[0-9]{4,6}$/.test(pin)) return showError("PIN must be 4-6 digits.");
       if (pin !== pinConfirmInput.value.trim()) return showError("PINs don't match.");
+      if (!consentDataInput.checked) return showError("Please accept the Privacy Policy and Terms of Use to continue.");
     } else {
       if (!/^[0-9]{4,6}$/.test(pin)) return showError("Enter your PIN.");
     }
@@ -134,6 +143,10 @@
 
     var body = { displayName: displayName, membershipNumber: membershipNumber };
     if (mode !== "credentials") body.pin = pin;
+    if (mode === "setup-pin") {
+      body.consentData = consentDataInput.checked;
+      body.consentMarketing = consentMarketingInput.checked;
+    }
 
     fetch("/api/auth?action=login", {
       method: "POST",

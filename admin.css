@@ -59,6 +59,7 @@ body { background: var(--bg); }
 .ad-status-dot.is-online { color: var(--green-600); font-weight: 600; }
 .ad-edit-btn { background: none; border: none; color: var(--red-600); font-weight: 700; font-size: 12.5px; cursor: pointer; }
 .ad-edit-btn:hover { text-decoration: underline; }
+.ad-consent-marketing { display: block; margin-top: 2px; font-size: 10.5px; font-weight: 600; color: var(--ink-muted); }
 
 .ad-edit-form { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 4px; }
 .ad-edit-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }

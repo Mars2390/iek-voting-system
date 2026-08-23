@@ -86,12 +86,24 @@
   var offset = 0;
   var searchTimer = null;
 
+  function consentCellHtml(e) {
+    var given = !!e.consentDataAt;
+    var dateStr = given ? new Date(e.consentDataAt).toLocaleDateString("en-GB") : "";
+    var dot =
+      '<span class="ad-status-dot' + (given ? " is-online" : "") + '" title="' +
+      (given ? "Data-processing consent given " + escapeHtml(dateStr) : "Data-processing consent not yet given (account still on PIN setup)") +
+      '"><span class="dot"></span>' + (given ? "Consented" : "Pending") + "</span>";
+    var marketing = e.consentMarketing ? '<span class="ad-consent-marketing" title="Opted in to marketing/opportunities emails">+ Marketing</span>' : "";
+    return dot + marketing;
+  }
+
   function rowHtml(e) {
     return (
       "<tr data-id=\"" + e.id + "\">" +
       "<td>" + escapeHtml(e.name) + "</td>" +
       "<td>" + escapeHtml(e.iekNumber) + "</td>" +
       '<td><span class="ad-status-dot' + (e.isActiveNow ? " is-online" : "") + '"><span class="dot"></span>' + (e.isActiveNow ? "Online" : "Offline") + "</span></td>" +
+      '<td>' + consentCellHtml(e) + '</td>' +
       "<td>" + escapeHtml(timeAgo(e.lastActive)) + "</td>" +
       "<td>" + escapeHtml(timeAgo(e.lastLogin)) + "</td>" +
       '<td><button type="button" class="ad-edit-btn" data-edit="' + e.id + '" data-name="' + escapeHtml(e.name) + '" data-number="' + escapeHtml(e.iekNumber) + '">Edit</button></td>' +
@@ -120,7 +132,7 @@
       if (seq !== loadEngineersSeq) return;
       if (reset) tbody.innerHTML = "";
       if (!d.engineers.length && reset) {
-        tbody.innerHTML = '<tr><td colspan="6"><div class="hub-empty">No engineers found.</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7"><div class="hub-empty">No engineers found.</div></td></tr>';
       } else {
         tbody.insertAdjacentHTML("beforeend", d.engineers.map(rowHtml).join(""));
       }

@@ -167,6 +167,9 @@ function privateEngineer(e) {
     lastActive: e.last_active,
     openToWork: !!e.open_to_work,
     verified: true,
+    consentDataAt: e.consent_data_at,
+    consentMarketing: !!e.consent_marketing,
+    consentMarketingAt: e.consent_marketing_at,
   };
 }
 
@@ -264,7 +267,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: "Method not allowed." });
       }
 
-      const { displayName, membershipNumber, pin } = req.body || {};
+      const { displayName, membershipNumber, pin, consentData, consentMarketing } = req.body || {};
       const digits = digitsOnly(membershipNumber);
       if (!digits) {
         return res.status(400).json({ error: "Enter your membership number." });
@@ -307,8 +310,19 @@ export default async function handler(req, res) {
         if (!isValidPin(pin)) {
           return res.status(400).json({ error: "PIN must be 4-6 digits." });
         }
+        // Required consent to be processed at all — captured once, here,
+        // at the same moment the account is actually activated. The
+        // marketing opt-in is separate and freely revocable later from
+        // Settings (see the update-profile action).
+        if (!consentData) {
+          return res.status(400).json({ error: "Please accept the Privacy Policy and Terms of Use to continue." });
+        }
+        const marketingOptIn = !!consentMarketing;
         await sql`
-          UPDATE engineers SET pin_hash = ${hashPin(pin)}, pin_set_at = CURRENT_TIMESTAMP, failed_pin_attempts = 0
+          UPDATE engineers SET pin_hash = ${hashPin(pin)}, pin_set_at = CURRENT_TIMESTAMP, failed_pin_attempts = 0,
+            consent_data_at = CURRENT_TIMESTAMP,
+            consent_marketing = ${marketingOptIn},
+            consent_marketing_at = ${marketingOptIn ? new Date() : null}
           WHERE id = ${engineer.id}
         `;
       } else {
@@ -419,6 +433,31 @@ export default async function handler(req, res) {
         RETURNING *
       `;
       await logActivity(sql, session.id, "profile_updated", `${updated.display_name || updated.name} updated their profile`);
+      return res.status(200).json({ engineer: privateEngineer(updated) });
+    }
+
+    // Separate from update-profile on purpose: that action unconditionally
+    // overwrites every profile field from the request body, so reusing it
+    // for a lone consent toggle would blank out bio/company/title/etc. on
+    // any call that didn't also resend them. Only the marketing opt-in is
+    // editable here — the required data-processing consent is captured
+    // once at account setup (see the `login` action) and isn't something
+    // a checkbox can silently revoke while the account stays active.
+    if (action === "consent") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const marketingOptIn = !!(req.body || {}).consentMarketing;
+      const [updated] = await sql`
+        UPDATE engineers SET
+          consent_marketing = ${marketingOptIn},
+          consent_marketing_at = ${marketingOptIn ? new Date() : null}
+        WHERE id = ${session.id}
+        RETURNING *
+      `;
       return res.status(200).json({ engineer: privateEngineer(updated) });
     }
 
@@ -1924,6 +1963,7 @@ export default async function handler(req, res) {
         const [rows, totalRow, activeRow] = await Promise.all([
           sql`
             SELECT id, iek_number, name, display_name, last_login, last_active, created_at,
+                   consent_data_at, consent_marketing,
                    (last_active > NOW() - INTERVAL '5 minutes') AS is_active_now
             FROM engineers
             WHERE (${q}::text = '' OR name ILIKE ${like} OR display_name ILIKE ${like} OR iek_number ILIKE ${like})
@@ -1943,6 +1983,8 @@ export default async function handler(req, res) {
             lastActive: e.last_active,
             createdAt: e.created_at,
             isActiveNow: e.is_active_now,
+            consentDataAt: e.consent_data_at,
+            consentMarketing: !!e.consent_marketing,
           })),
           total: Number(totalRow[0].count),
           activeNow: Number(activeRow[0].count),
@@ -2073,7 +2115,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import.",
     });
   } catch (err) {
     return sendError(res, err);

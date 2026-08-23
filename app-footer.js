@@ -13,7 +13,7 @@
     '<nav class="app-footer-links">' +
     '<a href="/privacy.html">Privacy Policy</a>' +
     '<a href="/terms.html">Terms of Use</a>' +
-    '<a href="mailto:albertmomanyi07@gmail.com">Contact</a>' +
+    '<a href="mailto:NES@engineerhuub.com">Contact</a>' +
     "</nav>" +
     "</div>" +
     "</footer>";

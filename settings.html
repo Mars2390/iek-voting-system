@@ -30,6 +30,29 @@
   </section>
 
   <section class="hub-card" style="margin-bottom:20px;">
+    <h2 style="margin:0 0 6px;font-size:15.5px;">Privacy &amp; Consent</h2>
+    <p style="font-size:13.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6;">
+      See the full <a href="/privacy.html">Privacy Policy</a> and <a href="/terms.html">Terms of Use</a>.
+    </p>
+    <div class="consent-group">
+      <label class="consent-check is-locked">
+        <input type="checkbox" id="settings-consent-data" checked disabled />
+        <span>I consent to Engineer Hub collecting and processing my information for profile creation, verification, networking and professional growth in accordance with the Privacy Policy and Terms of Use.</span>
+      </label>
+      <p class="consent-meta" id="settings-consent-data-meta"></p>
+      <label class="consent-check">
+        <input type="checkbox" id="settings-consent-marketing" />
+        <span>I would like to receive relevant engineering opportunities, jobs, internships, training, mentorship and professional development information.</span>
+      </label>
+    </div>
+    <p style="font-size:12.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6;">
+      The first is required to use Engineer Hub and can't be withdrawn from here — contact us using the details in the Privacy Policy to request account deletion instead. The second is optional and you can change it anytime.
+    </p>
+    <button id="settings-consent-save" class="eh-btn eh-btn-primary hub-btn-sm">Save preferences</button>
+    <div id="settings-consent-msg" class="lg-error" hidden style="margin-top:10px;"></div>
+  </section>
+
+  <section class="hub-card" style="margin-bottom:20px;">
     <h2 style="margin:0 0 6px;font-size:15.5px;">Security</h2>
     <p style="font-size:13.5px;color:var(--ink-muted);margin:0 0 14px;line-height:1.6;">
       Your account is protected by your membership number and PIN. If you're on a shared or

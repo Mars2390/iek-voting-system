@@ -74,6 +74,17 @@
         <input type="password" id="lg-pin-confirm" placeholder="Re-enter PIN" autocomplete="new-password" inputmode="numeric" maxlength="6" />
       </label>
 
+      <div class="consent-group" id="lg-consent-group" hidden>
+        <label class="consent-check">
+          <input type="checkbox" id="lg-consent-data" />
+          <span>I consent to Engineer Hub collecting and processing my information for profile creation, verification, networking and professional growth in accordance with the <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a> and <a href="/terms.html" target="_blank" rel="noopener">Terms of Use</a>.</span>
+        </label>
+        <label class="consent-check">
+          <input type="checkbox" id="lg-consent-marketing" />
+          <span>I would like to receive relevant engineering opportunities, jobs, internships, training, mentorship and professional development information.</span>
+        </label>
+      </div>
+
       <div id="lg-error" class="lg-error" hidden></div>
 
       <button type="submit" id="lg-submit" class="eh-btn eh-btn-primary lg-submit">
