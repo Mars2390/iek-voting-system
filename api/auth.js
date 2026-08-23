@@ -2,7 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getSql } from "./_db.js";
 import { applyCors, sendError } from "./_utils.js";
-import { sendBulkEmail, sendSingleEmail } from "./_email.js";
+import { sendBulkEmail, sendThreadEmail, verifyInboundWebhook, fetchReceivedEmail, extractThreadIdFromHeaders } from "./_email.js";
 
 // The Engineer Hub member API. One file, many `?action=` values — NOT
 // split into more files because this project sits at the Vercel Hobby
@@ -272,12 +272,41 @@ function computeProfileCompletion(e, counts) {
   };
 }
 
+// Body parsing is off (see the raw-body read at the top of the handler
+// below) because the inbound-webhook action needs the exact raw bytes
+// Resend signed — Vercel's default JSON auto-parse would consume the
+// request stream before that action ever saw it, and re-serializing an
+// already-parsed object back to JSON isn't guaranteed to byte-for-byte
+// match what was actually signed (key order, whitespace). Every other
+// action is unaffected: the handler replicates the same JSON auto-parse
+// itself, just after keeping a copy of the raw bytes first.
+export const config = { api: { bodyParser: false } };
+
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === "OPTIONS") return res.status(200).end();
 
   const sql = getSql();
   const { action } = req.query;
+
+  // Read the raw body exactly once. JSON requests get parsed into
+  // req.body (same shape every existing action already expects); a
+  // parse failure just leaves req.body as {} rather than 500ing every
+  // action up front, since some actions (GETs, multipart-ish image/
+  // Excel uploads handled via req.rawBody/readRawBody directly) never
+  // had a JSON body to parse in the first place.
+  const rawBodyBuffer = await readRawBody(req);
+  req.rawBody = rawBodyBuffer;
+  const contentType = req.headers["content-type"] || "";
+  if (contentType.includes("application/json")) {
+    try {
+      req.body = rawBodyBuffer.length ? JSON.parse(rawBodyBuffer.toString("utf8")) : {};
+    } catch (e) {
+      req.body = {};
+    }
+  } else {
+    req.body = rawBodyBuffer;
+  }
 
   try {
     // =========================================================
@@ -512,22 +541,32 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
-    // SUPPORT — engineer <-> admin messages. Engineers only ever see
-    // and create their own; admins see everyone's (admin-support*
-    // actions, grouped with the other admin-* actions further down).
+    // SUPPORT — a Gmail-style thread per conversation, not one flat
+    // message+reply row (see migrations/015_support_threads.sql for
+    // why). Engineers only ever see and create their own threads;
+    // admins see everyone's (admin-support* actions, grouped with the
+    // other admin-* actions further down, alongside inbound-webhook —
+    // the endpoint Resend calls when someone replies by email instead
+    // of through this page).
     // =========================================================
     if (action === "support") {
       if (req.method === "GET") {
         const session = await requireSession(sql, req, res);
         if (!session) return;
-        const rows = await sql`
-          SELECT id, subject, message, status, admin_reply, replied_at, created_at, updated_at
-          FROM support_messages WHERE engineer_id = ${session.id} ORDER BY created_at DESC
+        const threads = await sql`
+          SELECT id, subject, status, created_at, last_message_at
+          FROM support_threads WHERE engineer_id = ${session.id} ORDER BY last_message_at DESC
+        `;
+        if (!threads.length) return res.status(200).json({ threads: [] });
+        const ids = threads.map((t) => t.id);
+        const messages = await sql`
+          SELECT thread_id, sender_type, body, created_at FROM support_thread_messages
+          WHERE thread_id = ANY(${ids}) ORDER BY created_at ASC
         `;
         return res.status(200).json({
-          messages: rows.map((m) => ({
-            id: m.id, subject: m.subject, message: m.message, status: m.status,
-            adminReply: m.admin_reply, repliedAt: m.replied_at, createdAt: m.created_at, updatedAt: m.updated_at,
+          threads: threads.map((t) => ({
+            id: t.id, subject: t.subject, status: t.status, createdAt: t.created_at, lastMessageAt: t.last_message_at,
+            messages: messages.filter((m) => m.thread_id === t.id).map((m) => ({ senderType: m.sender_type, body: m.body, createdAt: m.created_at })),
           })),
         });
       }
@@ -538,15 +577,96 @@ export default async function handler(req, res) {
         const subject = String(b.subject || "").trim().slice(0, 255);
         const message = String(b.message || "").trim().slice(0, 5000);
         if (!subject || !message) return res.status(400).json({ error: "Add a subject and a message." });
-        const [created] = await sql`
-          INSERT INTO support_messages (engineer_id, subject, message) VALUES (${session.id}, ${subject}, ${message}) RETURNING *
+        const [thread] = await sql`
+          INSERT INTO support_threads (engineer_id, sender_name, sender_email, subject)
+          VALUES (${session.id}, ${session.display_name || session.name}, ${session.email}, ${subject})
+          RETURNING *
         `;
-        return res.status(201).json({
-          message: { id: created.id, subject: created.subject, message: created.message, status: created.status, createdAt: created.created_at },
-        });
+        await sql`
+          INSERT INTO support_thread_messages (thread_id, sender_type, sender_name, sender_email, body)
+          VALUES (${thread.id}, 'engineer', ${session.display_name || session.name}, ${session.email}, ${message})
+        `;
+        return res.status(201).json({ thread: { id: thread.id, subject: thread.subject, status: thread.status, createdAt: thread.created_at } });
       }
       res.setHeader("Allow", "GET, POST, OPTIONS");
       return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    // Resend calls this when an email arrives at the reply-to address
+    // (see api/_email.js's emailReplyTo doc comment for why that's a
+    // different address from NES@engineerhuub.com itself). No session —
+    // this is a server-to-server call, authenticated by the Resend
+    // webhook signature instead (verifyInboundWebhook throws on a bad
+    // one, same effect as a rejected session).
+    if (action === "inbound-webhook") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      // Not readRawBody(req) here — for a JSON request (which this always
+      // is) the top-of-handler step above already parsed req.body into an
+      // object, so re-reading a Buffer.isBuffer(req.body) fast path would
+      // find neither a Buffer nor a live stream. req.rawBody is the exact
+      // pre-parse bytes saved for precisely this reason.
+      let event;
+      try {
+        event = verifyInboundWebhook(req.rawBody.toString("utf8"), req.headers);
+      } catch (err) {
+        return res.status(401).json({ error: "Invalid webhook signature." });
+      }
+      // Resend can retry a webhook delivery, and this endpoint may also
+      // be subscribed to event types beyond email.received (harmless to
+      // receive, nothing to do with them) — 200 immediately either way
+      // so Resend doesn't keep retrying something that was never going
+      // to be actionable.
+      if (event.type !== "email.received") return res.status(200).json({ received: true });
+
+      const emailId = event.data.email_id;
+      const [already] = await sql`SELECT id FROM support_thread_messages WHERE resend_email_id = ${emailId}`;
+      if (already) return res.status(200).json({ received: true, duplicate: true });
+
+      let full;
+      try {
+        full = await fetchReceivedEmail(emailId);
+      } catch (err) {
+        // Resend's own delivery guarantees mean it'll retry a non-2xx
+        // response — surfacing this as a 502 lets that retry happen
+        // instead of silently losing the reply because our follow-up
+        // GET for the body happened to fail once.
+        return res.status(502).json({ error: "Couldn't fetch the received email: " + (err.message || String(err)) });
+      }
+
+      const threadId = extractThreadIdFromHeaders(full.headers);
+      const fromEmail = String(full.from || "").replace(/^.*<([^>]+)>.*$/, "$1").trim().toLowerCase();
+      const fromName = String(full.from || "").replace(/<.*$/, "").trim().replace(/^"|"$/g, "") || fromEmail;
+      const body = (full.text || "").trim() || (full.html || "").replace(/<[^>]+>/g, " ").trim() || "(no message body)";
+
+      if (threadId) {
+        const [thread] = await sql`SELECT id FROM support_threads WHERE id = ${threadId}`;
+        if (thread) {
+          await sql`
+            INSERT INTO support_thread_messages (thread_id, sender_type, sender_name, sender_email, body, source, resend_email_id, email_message_id)
+            VALUES (${threadId}, 'engineer', ${fromName}, ${fromEmail}, ${body}, 'inbound_email', ${emailId}, ${full.message_id || null})
+          `;
+          await sql`UPDATE support_threads SET status = 'pending', last_message_at = CURRENT_TIMESTAMP WHERE id = ${threadId}`;
+          return res.status(200).json({ received: true, threadId });
+        }
+      }
+      // No thread match — either a cold reply to an address that never
+      // had a thread, or the In-Reply-To header didn't survive whatever
+      // the sender's email client did to it. Attach it to the engineer
+      // it came from if we recognize the address, so it's not lost.
+      const [matchedEngineer] = fromEmail ? await sql`SELECT id, display_name, name FROM engineers WHERE email = ${fromEmail}` : [];
+      const [newThread] = await sql`
+        INSERT INTO support_threads (engineer_id, sender_name, sender_email, subject)
+        VALUES (${matchedEngineer ? matchedEngineer.id : null}, ${matchedEngineer ? (matchedEngineer.display_name || matchedEngineer.name) : fromName}, ${fromEmail}, ${String(full.subject || "(no subject)").slice(0, 255)})
+        RETURNING id
+      `;
+      await sql`
+        INSERT INTO support_thread_messages (thread_id, sender_type, sender_name, sender_email, body, source, resend_email_id, email_message_id)
+        VALUES (${newThread.id}, 'engineer', ${fromName}, ${fromEmail}, ${body}, 'inbound_email', ${emailId}, ${full.message_id || null})
+      `;
+      return res.status(200).json({ received: true, threadId: newThread.id, newThread: true });
     }
 
     if (action === "upload-photo") {
@@ -1081,6 +1201,7 @@ export default async function handler(req, res) {
               subject: tpl.subject,
               body: tpl.body,
               extraVars: { event_title: row.title, event_date: eventDateStr, event_location: row.location ? " at " + row.location : "" },
+              ctaLabel: "View on IEK Calendar", ctaUrl: "https://www.engineerhuub.com/calendar.html",
             });
             const failed = results.filter((r) => !r.ok);
             const status = failed.length === 0 ? "sent" : failed.length === results.length ? "failed" : "partial";
@@ -2172,14 +2293,15 @@ export default async function handler(req, res) {
       const admin = await requireAdminSession(sql, req, res);
       if (!admin) return;
       const [rows, disciplines, companies] = await Promise.all([
-        sql`SELECT id, display_name, name, email, discipline, company FROM engineers WHERE email IS NOT NULL AND email != '' ORDER BY display_name NULLS LAST, name`,
+        sql`SELECT id, display_name, name, email, discipline, company, consent_marketing FROM engineers WHERE email IS NOT NULL AND email != '' ORDER BY display_name NULLS LAST, name`,
         sql`SELECT DISTINCT discipline FROM engineers WHERE discipline IS NOT NULL AND email IS NOT NULL AND email != '' ORDER BY discipline`,
         sql`SELECT DISTINCT company FROM engineers WHERE company IS NOT NULL AND email IS NOT NULL AND email != '' ORDER BY company`,
       ]);
       return res.status(200).json({
-        engineers: rows.map((e) => ({ id: e.id, name: e.display_name || e.name, email: e.email, discipline: e.discipline, company: e.company })),
+        engineers: rows.map((e) => ({ id: e.id, name: e.display_name || e.name, email: e.email, discipline: e.discipline, company: e.company, consentMarketing: !!e.consent_marketing })),
         disciplines: disciplines.map((d) => d.discipline),
         companies: companies.map((c) => c.company),
+        marketingConsentCount: rows.filter((e) => e.consent_marketing).length,
       });
     }
 
@@ -2195,16 +2317,24 @@ export default async function handler(req, res) {
       const body = String(b.body || "").trim().slice(0, 20000);
       if (!subject || !body) return res.status(400).json({ error: "Add a subject and a message." });
 
+      // Broadcast-style targeting (all / by discipline / by company)
+      // respects the marketing opt-in captured at signup and editable in
+      // Settings (see migrations/013_consent.sql) — this tool exists to
+      // send exactly the kind of content that consent describes ("jobs,
+      // internships, training, mentorship..."). Picking specific people
+      // by name is left unfiltered: an admin explicitly addressing one
+      // person is a direct communication, not the broadcast that opt-in
+      // was ever meant to gate.
       let recipients;
       if (Array.isArray(b.recipientIds) && b.recipientIds.length) {
         const ids = b.recipientIds.map(Number).filter(Boolean);
         recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE id = ANY(${ids}) AND email IS NOT NULL AND email != ''`;
       } else if (b.filterDiscipline) {
-        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE discipline = ${b.filterDiscipline} AND email IS NOT NULL AND email != ''`;
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE discipline = ${b.filterDiscipline} AND consent_marketing = TRUE AND email IS NOT NULL AND email != ''`;
       } else if (b.filterCompany) {
-        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE company = ${b.filterCompany} AND email IS NOT NULL AND email != ''`;
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE company = ${b.filterCompany} AND consent_marketing = TRUE AND email IS NOT NULL AND email != ''`;
       } else if (b.all) {
-        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE email IS NOT NULL AND email != ''`;
+        recipients = await sql`SELECT id, display_name, name, email FROM engineers WHERE consent_marketing = TRUE AND email IS NOT NULL AND email != ''`;
       } else {
         return res.status(400).json({ error: "Choose at least one recipient." });
       }
@@ -2215,7 +2345,10 @@ export default async function handler(req, res) {
       let results;
       let topLevelError = null;
       try {
-        results = await sendBulkEmail({ recipients: recipientList, subject, body });
+        results = await sendBulkEmail({
+          recipients: recipientList, subject, body,
+          ctaLabel: "Open Engineer Hub", ctaUrl: "https://www.engineerhuub.com/dashboard.html",
+        });
       } catch (err) {
         topLevelError = err.message || String(err);
         results = recipientList.map((r) => ({ engineerId: r.id, email: r.email, ok: false, error: topLevelError }));
@@ -2292,27 +2425,36 @@ export default async function handler(req, res) {
     }
 
     if (action === "admin-support") {
-      if (req.method !== "GET") {
-        res.setHeader("Allow", "GET, OPTIONS");
-        return res.status(405).json({ error: "Method not allowed." });
-      }
       const admin = await requireAdminSession(sql, req, res);
       if (!admin) return;
-      const status = String(req.query.status || "").trim();
-      const rows = await sql`
-        SELECT sm.id, sm.subject, sm.message, sm.status, sm.admin_reply, sm.replied_by, sm.replied_at, sm.created_at,
-               e.id AS engineer_id, e.display_name, e.name, e.iek_number, e.email
-        FROM support_messages sm JOIN engineers e ON e.id = sm.engineer_id
-        WHERE (${status}::text = '' OR sm.status = ${status})
-        ORDER BY (sm.status = 'pending') DESC, sm.created_at DESC
-      `;
-      return res.status(200).json({
-        messages: rows.map((m) => ({
-          id: m.id, subject: m.subject, message: m.message, status: m.status, adminReply: m.admin_reply,
-          repliedBy: m.replied_by, repliedAt: m.replied_at, createdAt: m.created_at,
-          engineer: { id: m.engineer_id, name: m.display_name || m.name, iekNumber: m.iek_number, email: m.email },
-        })),
-      });
+
+      if (req.method === "GET") {
+        const status = String(req.query.status || "").trim();
+        const threads = await sql`
+          SELECT t.*, e.iek_number
+          FROM support_threads t LEFT JOIN engineers e ON e.id = t.engineer_id
+          WHERE (${status}::text = '' OR t.status = ${status})
+          ORDER BY (t.status = 'pending') DESC, t.last_message_at DESC
+        `;
+        if (!threads.length) return res.status(200).json({ threads: [] });
+        const ids = threads.map((t) => t.id);
+        const messages = await sql`
+          SELECT thread_id, sender_type, sender_name, sender_email, body, source, created_at
+          FROM support_thread_messages WHERE thread_id = ANY(${ids}) ORDER BY created_at ASC
+        `;
+        return res.status(200).json({
+          threads: threads.map((t) => ({
+            id: t.id, subject: t.subject, status: t.status, createdAt: t.created_at, lastMessageAt: t.last_message_at,
+            sender: { id: t.engineer_id, name: t.sender_name, email: t.sender_email, iekNumber: t.iek_number },
+            messages: messages.filter((m) => m.thread_id === t.id).map((m) => ({
+              senderType: m.sender_type, senderName: m.sender_name, senderEmail: m.sender_email,
+              body: m.body, source: m.source, createdAt: m.created_at,
+            })),
+          })),
+        });
+      }
+      res.setHeader("Allow", "GET, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
     }
 
     if (action === "admin-support-reply") {
@@ -2323,34 +2465,46 @@ export default async function handler(req, res) {
       const admin = await requireAdminSession(sql, req, res);
       if (!admin) return;
       const b = req.body || {};
-      const id = Number(b.id);
+      const threadId = Number(b.id);
       const reply = String(b.reply || "").trim().slice(0, 5000);
-      if (!id || !reply) return res.status(400).json({ error: "Write a reply." });
-      const [updated] = await sql`
-        UPDATE support_messages
-        SET admin_reply = ${reply}, status = 'resolved', replied_by = ${admin.email}, replied_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ${id}
-        RETURNING *
+      if (!threadId || !reply) return res.status(400).json({ error: "Write a reply." });
+      const [thread] = await sql`SELECT * FROM support_threads WHERE id = ${threadId}`;
+      if (!thread) return res.status(404).json({ error: "Support thread not found." });
+
+      const [msgRow] = await sql`
+        INSERT INTO support_thread_messages (thread_id, sender_type, sender_name, sender_email, body)
+        VALUES (${threadId}, 'admin', ${admin.email}, ${admin.email}, ${reply})
+        RETURNING id
       `;
-      if (!updated) return res.status(404).json({ error: "Support message not found." });
-      const [engineer] = await sql`SELECT display_name, name, email FROM engineers WHERE id = ${updated.engineer_id}`;
-      // Best-effort — a member with no email on file, or a Resend hiccup,
-      // shouldn't stop the reply from saving; they'll still see it next
-      // time they open Support.
-      if (engineer && engineer.email) {
+      await sql`UPDATE support_threads SET status = 'resolved', last_message_at = CURRENT_TIMESTAMP WHERE id = ${threadId}`;
+
+      // Best-effort — a thread with no email on file (an in-app-only
+      // conversation), or a Resend hiccup, shouldn't stop the reply from
+      // saving; the engineer still sees it next time they open Support.
+      if (thread.sender_email) {
         try {
-          await sendSingleEmail({
-            to: engineer.email,
-            subject: "Re: " + updated.subject,
-            body: "Hi " + (engineer.display_name || engineer.name) + ",\n\n" + reply + "\n\n— National Engineering Strategy Secretariat",
+          // Threading this under the most recent inbound message we have
+          // (if any) so it lands in the same conversation in the
+          // recipient's own email client, not as a disconnected new email.
+          const [lastInbound] = await sql`
+            SELECT email_message_id FROM support_thread_messages
+            WHERE thread_id = ${threadId} AND source = 'inbound_email' AND email_message_id IS NOT NULL
+            ORDER BY created_at DESC LIMIT 1
+          `;
+          const { resendEmailId, outboundMessageId } = await sendThreadEmail({
+            to: thread.sender_email,
+            subject: (thread.subject || "").toLowerCase().startsWith("re:") ? thread.subject : "Re: " + thread.subject,
+            body: "Hi " + (thread.sender_name || "there") + ",\n\n" + reply + "\n\n— National Engineering Strategy Secretariat",
+            threadId,
+            messageRowId: msgRow.id,
+            inReplyTo: lastInbound ? lastInbound.email_message_id : null,
           });
+          await sql`UPDATE support_thread_messages SET resend_email_id = ${resendEmailId}, outbound_message_id = ${outboundMessageId} WHERE id = ${msgRow.id}`;
         } catch (err) {
           // Swallowed on purpose (see comment above).
         }
       }
-      return res.status(200).json({
-        message: { id: updated.id, subject: updated.subject, status: updated.status, adminReply: updated.admin_reply, repliedAt: updated.replied_at },
-      });
+      return res.status(200).json({ thread: { id: thread.id, status: "resolved" } });
     }
 
     if (action === "admin-import") {

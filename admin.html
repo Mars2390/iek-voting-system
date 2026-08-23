@@ -163,10 +163,10 @@
         <div class="lg-field">
           <span>Recipients</span>
           <div class="ad-recipient-mode">
-            <label><input type="radio" name="ad-recip-mode" value="all" checked /> All engineers with an email (<span id="ad-recip-all-count">0</span>)</label>
-            <label><input type="radio" name="ad-recip-mode" value="discipline" /> By discipline</label>
-            <label><input type="radio" name="ad-recip-mode" value="company" /> By company</label>
-            <label><input type="radio" name="ad-recip-mode" value="individual" /> Choose individually</label>
+            <label><input type="radio" name="ad-recip-mode" value="all" checked /> Everyone who opted in to updates (<span id="ad-recip-all-count">0</span>)</label>
+            <label><input type="radio" name="ad-recip-mode" value="discipline" /> By discipline (opted in only)</label>
+            <label><input type="radio" name="ad-recip-mode" value="company" /> By company (opted in only)</label>
+            <label><input type="radio" name="ad-recip-mode" value="individual" /> Choose individually (bypasses opt-in — for a direct message to one person)</label>
           </div>
         </div>
         <label class="lg-field" id="ad-recip-discipline-group" hidden>
@@ -239,20 +239,24 @@
 </main>
 
 <div id="ad-support-reply-overlay" class="hub-modal-overlay" hidden>
-  <div class="hub-modal">
-    <div class="hub-modal-head"><h3>Reply to support message</h3><button type="button" id="ad-support-reply-close" class="hub-modal-close">&times;</button></div>
-    <div class="hub-modal-body" style="padding:18px 20px;">
-      <p id="ad-support-reply-original" style="font-size:13.5px;color:var(--ink-muted);white-space:pre-line;margin:0 0 14px;"></p>
-      <form id="ad-support-reply-form">
-        <input type="hidden" id="ad-support-reply-id" />
-        <label class="lg-field"><span>Your reply</span><textarea id="ad-support-reply-text" rows="5" class="pf-form-textarea" required></textarea></label>
-        <div id="ad-support-reply-error" class="lg-error" hidden></div>
-        <div class="ad-edit-actions">
-          <button type="button" id="ad-support-reply-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm">Cancel</button>
-          <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Send reply</button>
-        </div>
-      </form>
+  <div class="hub-modal ad-thread-modal">
+    <div class="hub-modal-head">
+      <div>
+        <h3 id="ad-thread-subject">Conversation</h3>
+        <p id="ad-thread-sender" class="ad-thread-sender-line"></p>
+      </div>
+      <button type="button" id="ad-support-reply-close" class="hub-modal-close">&times;</button>
     </div>
+    <div id="ad-thread-messages" class="ad-thread-messages"></div>
+    <form id="ad-support-reply-form" class="ad-thread-reply-form">
+      <input type="hidden" id="ad-support-reply-id" />
+      <textarea id="ad-support-reply-text" rows="3" class="pf-form-textarea" placeholder="Write a reply…" required></textarea>
+      <div id="ad-support-reply-error" class="lg-error" hidden></div>
+      <div class="ad-edit-actions">
+        <button type="button" id="ad-support-reply-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm">Close</button>
+        <button type="submit" class="eh-btn eh-btn-primary hub-btn-sm">Send reply</button>
+      </div>
+    </form>
   </div>
 </div>
 

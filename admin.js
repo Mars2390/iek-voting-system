@@ -380,7 +380,7 @@
   function loadRecipients() {
     adminApi("admin-email-recipients").then(function (d) {
       allRecipients = d.engineers;
-      document.getElementById("ad-recip-all-count").textContent = d.engineers.length;
+      document.getElementById("ad-recip-all-count").textContent = d.marketingConsentCount;
       var discSel = document.getElementById("ad-recip-discipline");
       discSel.innerHTML = d.disciplines.map(function (x) { return '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + "</option>"; }).join("");
       var compSel = document.getElementById("ad-recip-company");
@@ -397,7 +397,8 @@
       .map(function (r) {
         return (
           '<label class="ad-recip-row"><input type="checkbox" value="' + r.id + '" ' + (selectedRecipientIds[r.id] ? "checked" : "") + " />" +
-          escapeHtml(r.name) + '<span class="ad-recip-email">' + escapeHtml(r.email) + "</span></label>"
+          escapeHtml(r.name) + (r.consentMarketing ? "" : ' <span class="ad-recip-noconsent">(not opted in)</span>') +
+          '<span class="ad-recip-email">' + escapeHtml(r.email) + "</span></label>"
         );
       })
       .join("") || '<div class="hub-empty">No matches.</div>';
@@ -568,39 +569,61 @@
   var supportReplyOverlay = document.getElementById("ad-support-reply-overlay");
   var supportReplyForm = document.getElementById("ad-support-reply-form");
 
-  function loadSupport() {
+  var allThreads = [];
+  function renderThreadList(threads) {
     var listEl = document.getElementById("ad-support-list");
-    listEl.innerHTML = '<div class="hub-loading">Loading…</div>';
-    adminApi("admin-support", { query: { status: supportFilter.value } }).then(function (d) {
-      listEl.innerHTML = d.messages.length
-        ? d.messages
-            .map(function (m) {
-              return (
-                '<div class="hub-feed-item" style="align-items:flex-start;">' +
-                "<div>" +
-                "<p><strong>" + escapeHtml(m.subject) + "</strong> — " + escapeHtml(m.engineer.name) + " (" + escapeHtml(m.engineer.iekNumber) + ")</p>" +
-                '<time style="display:block;margin-bottom:6px;">' + escapeHtml(timeAgo(m.createdAt)) + "</time>" +
-                "<p style=\"font-size:13px;color:var(--ink);white-space:pre-line;margin:0;\">" + escapeHtml(m.message) + "</p>" +
-                (m.adminReply ? '<p style="font-size:12.5px;color:var(--ink-muted);margin-top:8px;"><strong>Your reply:</strong> ' + escapeHtml(m.adminReply) + "</p>" : "") +
-                "</div>" +
-                (m.status === "pending" ? '<button type="button" class="ad-edit-btn" data-reply="' + m.id + '" style="margin-left:auto;flex-shrink:0;">Reply</button>' : '<span class="ad-status-dot is-online" style="margin-left:auto;flex-shrink:0;"><span class="dot"></span>Replied</span>') +
-                "</div>"
-              );
-            })
-            .join("")
-        : '<div class="hub-empty">No support messages.</div>';
-      listEl.querySelectorAll("[data-reply]").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          var msg = d.messages.find(function (x) { return x.id === Number(btn.dataset.reply); });
-          document.getElementById("ad-support-reply-id").value = msg.id;
-          document.getElementById("ad-support-reply-original").textContent = msg.subject + "\n\n" + msg.message;
-          document.getElementById("ad-support-reply-text").value = "";
-          document.getElementById("ad-support-reply-error").hidden = true;
-          supportReplyOverlay.hidden = false;
-        });
-      });
+    listEl.innerHTML = threads.length
+      ? threads
+          .map(function (t) {
+            var last = t.messages[t.messages.length - 1];
+            var preview = last ? last.body.slice(0, 90) + (last.body.length > 90 ? "…" : "") : "";
+            var who = t.sender.name || t.sender.email || "Unknown sender";
+            return (
+              '<div class="hub-feed-item ad-thread-row" data-open-thread="' + t.id + '" style="align-items:flex-start;cursor:pointer;">' +
+              "<div>" +
+              "<p><strong>" + escapeHtml(t.subject) + "</strong> — " + escapeHtml(who) + (t.sender.iekNumber ? " (" + escapeHtml(t.sender.iekNumber) + ")" : "") + "</p>" +
+              '<time style="display:block;margin-bottom:6px;">' + t.messages.length + " message" + (t.messages.length === 1 ? "" : "s") + " · " + escapeHtml(timeAgo(t.lastMessageAt)) + "</time>" +
+              '<p style="font-size:13px;color:var(--ink-muted);margin:0;">' + escapeHtml(preview) + "</p>" +
+              "</div>" +
+              (t.status === "pending" ? '<span class="ad-status-dot" style="margin-left:auto;flex-shrink:0;"><span class="dot"></span>Pending</span>' : '<span class="ad-status-dot is-online" style="margin-left:auto;flex-shrink:0;"><span class="dot"></span>Replied</span>') +
+              "</div>"
+            );
+          })
+          .join("")
+      : '<div class="hub-empty">No support conversations.</div>';
+    listEl.querySelectorAll("[data-open-thread]").forEach(function (row) {
+      row.addEventListener("click", function () { openThread(Number(row.dataset.openThread)); });
     });
   }
+  function loadSupport() {
+    document.getElementById("ad-support-list").innerHTML = '<div class="hub-loading">Loading…</div>';
+    refreshSupportList();
+  }
+
+  function openThread(threadId) {
+    var t = allThreads.find(function (x) { return x.id === threadId; });
+    if (!t) return;
+    document.getElementById("ad-support-reply-id").value = t.id;
+    document.getElementById("ad-thread-subject").textContent = t.subject;
+    document.getElementById("ad-thread-sender").textContent =
+      (t.sender.name || t.sender.email || "Unknown sender") + (t.sender.email ? " · " + t.sender.email : "");
+    document.getElementById("ad-thread-messages").innerHTML = t.messages
+      .map(function (m) {
+        return (
+          '<div class="ad-thread-msg is-' + m.senderType + (m.source === "inbound_email" ? " is-inbound" : "") + '">' +
+          escapeHtml(m.body) +
+          '<span class="ad-thread-msg-meta">' + (m.senderType === "admin" ? "You" : escapeHtml(m.senderName || "them")) + " · " + escapeHtml(timeAgo(m.createdAt)) + "</span>" +
+          "</div>"
+        );
+      })
+      .join("");
+    document.getElementById("ad-thread-messages").scrollTop = document.getElementById("ad-thread-messages").scrollHeight;
+    document.getElementById("ad-support-reply-text").value = "";
+    document.getElementById("ad-support-reply-error").hidden = true;
+    supportReplyOverlay.hidden = false;
+    document.getElementById("ad-support-reply-text").focus();
+  }
+
   supportFilter.addEventListener("change", loadSupport);
   document.getElementById("ad-support-reply-close").addEventListener("click", function () { supportReplyOverlay.hidden = true; });
   document.getElementById("ad-support-reply-cancel").addEventListener("click", function () { supportReplyOverlay.hidden = true; });
@@ -611,14 +634,32 @@
     errBox.hidden = true;
     var id = Number(document.getElementById("ad-support-reply-id").value);
     var reply = document.getElementById("ad-support-reply-text").value.trim();
+    var submitBtn = supportReplyForm.querySelector("button[type=submit]");
+    submitBtn.disabled = true;
     adminApi("admin-support-reply", { method: "POST", body: { id: id, reply: reply } })
       .then(function () {
-        supportReplyOverlay.hidden = true;
         toast("Reply sent");
-        loadSupport();
+        return refreshSupportList();
       })
-      .catch(function (err) { errBox.textContent = err.message; errBox.hidden = false; });
+      .then(function (d) {
+        // Re-open the same conversation with the refreshed data so the
+        // admin sees their own reply appended in place, rather than the
+        // modal just closing on them mid-conversation. If the reply
+        // filter (e.g. "Pending only") now excludes this thread, close
+        // instead of showing a stale/hidden one.
+        if (d.threads.some(function (t) { return t.id === id; })) openThread(id);
+        else supportReplyOverlay.hidden = true;
+      })
+      .catch(function (err) { errBox.textContent = err.message; errBox.hidden = false; })
+      .finally(function () { submitBtn.disabled = false; });
   });
+  function refreshSupportList() {
+    return adminApi("admin-support", { query: { status: supportFilter.value } }).then(function (d) {
+      allThreads = d.threads;
+      renderThreadList(d.threads);
+      return d;
+    });
+  }
 
   loadStats();
   loadEngineers(true);

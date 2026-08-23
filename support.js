@@ -14,22 +14,28 @@
     return s === "resolved" ? "Replied" : "Pending";
   }
 
-  function renderList(messages) {
-    if (!messages.length) {
+  function renderList(threads) {
+    if (!threads.length) {
       listEl.innerHTML = '<div class="hub-empty">You haven\'t sent any messages yet.</div>';
       return;
     }
-    listEl.innerHTML = messages
-      .map(function (m) {
+    listEl.innerHTML = threads
+      .map(function (t) {
+        var bubbles = t.messages
+          .map(function (m) {
+            return (
+              '<div class="sup-bubble is-' + m.senderType + '">' + H.escapeHtml(m.body) +
+              '<span class="sup-bubble-meta">' + (m.senderType === "admin" ? "National Engineering Strategy Secretariat" : "You") + " · " + H.timeAgo(m.createdAt) + "</span>" +
+              "</div>"
+            );
+          })
+          .join("");
         return (
           '<div class="sup-item">' +
-          '<div class="sup-item-head"><h3>' + H.escapeHtml(m.subject) + '</h3>' +
-          '<span class="sup-status' + (m.status === "resolved" ? " is-resolved" : "") + '">' + statusLabel(m.status) + "</span></div>" +
-          '<p class="sup-item-date">' + H.timeAgo(m.createdAt) + "</p>" +
-          '<p class="sup-item-message">' + H.escapeHtml(m.message) + "</p>" +
-          (m.adminReply
-            ? '<div class="sup-reply"><p class="sup-reply-label">Reply from National Engineering Strategy Secretariat</p><p>' + H.escapeHtml(m.adminReply) + "</p></div>"
-            : "") +
+          '<div class="sup-item-head"><h3>' + H.escapeHtml(t.subject) + '</h3>' +
+          '<span class="sup-status' + (t.status === "resolved" ? " is-resolved" : "") + '">' + statusLabel(t.status) + "</span></div>" +
+          '<p class="sup-item-date">' + H.timeAgo(t.lastMessageAt) + "</p>" +
+          '<div class="sup-thread">' + bubbles + "</div>" +
           "</div>"
         );
       })
@@ -38,7 +44,7 @@
 
   function loadMessages() {
     H.api("support")
-      .then(function (data) { renderList(data.messages); })
+      .then(function (data) { renderList(data.threads); })
       .catch(function () { listEl.innerHTML = '<div class="hub-empty">Couldn\'t load your messages.</div>'; });
   }
   loadMessages();
