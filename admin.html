@@ -139,6 +139,35 @@
     <div id="ad-event-list" class="hub-list"></div>
   </section>
 
+  <section class="ad-card" id="ad-elections-card">
+    <h2>Elections</h2>
+    <p class="ad-card-sub">Create an official election, set its voting window, verify candidates, close voting, and announce the winners. Every member gets an in-app notification when an election is created, opens, and when results are announced.</p>
+    <form id="ad-election-form" class="ad-add-form" style="flex-direction:column;align-items:stretch;gap:14px;">
+      <input type="hidden" id="ad-election-id" />
+      <label class="lg-field"><span>Title</span><input type="text" id="ad-election-title" placeholder="e.g. IEK Council Elections 2026" required /></label>
+      <label class="lg-field"><span>Description (optional)</span><textarea id="ad-election-description" rows="2" class="pf-form-textarea"></textarea></label>
+      <label class="lg-field"><span>Positions — one per line</span><textarea id="ad-election-positions" rows="4" class="pf-form-textarea" placeholder="President&#10;Vice President&#10;Honorary Secretary&#10;Honorary Treasurer" required></textarea></label>
+      <div class="pf-form-row">
+        <label class="lg-field"><span>Voting opens</span><input type="datetime-local" id="ad-election-opens" /><small>Leave blank to open it manually with "Open voting now".</small></label>
+        <label class="lg-field"><span>Voting closes</span><input type="datetime-local" id="ad-election-closes" /><small>Leave blank to close it manually.</small></label>
+      </div>
+      <div class="ad-recipient-mode">
+        <label><input type="checkbox" id="ad-election-nominations" checked /> Accept campaigns (nominations open)</label>
+        <label><input type="checkbox" id="ad-election-autoverify" /> Automatically verify every candidate (otherwise you verify each one below)</label>
+      </div>
+      <div id="ad-election-error" class="lg-error" hidden></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button type="submit" id="ad-election-submit" class="eh-btn eh-btn-primary hub-btn-sm">Create election</button>
+        <button type="button" id="ad-election-cancel" class="eh-btn eh-btn-ghost-light hub-btn-sm" hidden>Cancel edit</button>
+      </div>
+    </form>
+
+    <div class="ad-divider"></div>
+
+    <h2 style="margin-bottom:14px;">All elections</h2>
+    <div id="ad-election-list" class="hub-list"></div>
+  </section>
+
   <section class="ad-card">
     <div class="ad-table-head">
       <h2>All engineers</h2>

@@ -1,7 +1,8 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getSql } from "./_db.js";
-import { applyCors, sendError } from "./_utils.js";
+import { applyCors, sendError, logAudit, getClientIp } from "./_utils.js";
+import { sendViaSozuri, toSozuriMsisdn, smsIsConfigured } from "./_sozuri.js";
 import { sendBulkEmail, sendEventInviteEmail, sendThreadEmail, verifyInboundWebhook, fetchReceivedEmail, extractThreadIdFromHeaders } from "./_email.js";
 
 // The Engineer Hub member API. One file, many `?action=` values — NOT
@@ -16,7 +17,10 @@ import { sendBulkEmail, sendEventInviteEmail, sendThreadEmail, verifyInboundWebh
 // toggle-open-to-work, conversations, messages, admin-login,
 // admin-logout, admin-me, admin-engineers, admin-import,
 // admin-email-recipients, admin-send-email, admin-send-event-email,
-// admin-email-logs, admin-email-templates, admin-support, admin-support-reply.
+// admin-email-logs, admin-email-templates, admin-support, admin-support-reply,
+// and the Voting system: elections, campaigns, upload-campaign-photo,
+// ballot, vote, election-results, campaign-sms-recipients, campaign-sms,
+// campaign-sms-batch, campaign-sms-dispatch (see the VOTING section).
 //
 // A membership number is not a secret — it's a lookup key, not a
 // credential — so login also requires a PIN the member sets on their
@@ -270,6 +274,165 @@ function computeProfileCompletion(e, counts) {
     percent: Math.round((done / checks.length) * 100),
     missing: checks.filter((c) => !c.done).map((c) => ({ label: c.label, anchor: c.anchor })),
   };
+}
+
+// ---------- Voting: elections, campaigns, ballots, campaign SMS ----------
+// See migrations/016_elections.sql and the VOTING section of the handler.
+const CAMPAIGN_SMS_DAILY_LIMIT = 3;     // batches per campaign per rolling 24h — every send draws on the shared Sozuri credit
+const CAMPAIGN_SMS_MAX_CHARS = 300;     // the candidate's own text; the auto-signature (name + vote link) is added on top
+const SMS_DISPATCH_CHUNK = 15;          // recipients claimed per dispatch call — keeps each call well inside one request
+const SMS_DISPATCH_CONCURRENCY = 3;
+const CAMPAIGN_MAX_DAYS = 180;
+
+// An election's effective phase, computed in SQL so every reader (ballot,
+// results, admin list, vote acceptance) agrees to the millisecond, and so
+// the admin's manual "close now" (closed_at) and the scheduled window
+// (opens_at/closes_at) are compared against the same NOW(). All three
+// columns are TIMESTAMPTZ instants — never the naive wall-clock TIMESTAMP
+// that `events` uses — because a ballot is *accepted or rejected* on this
+// comparison, which has to be unambiguous regardless of server timezone.
+function electionPhaseSql(alias, closedLabel = "closed") {
+  const a = alias ? alias + "." : "";
+  return `CASE
+    WHEN ${a}closed_at IS NOT NULL OR (${a}closes_at IS NOT NULL AND ${a}closes_at <= NOW()) THEN '${closedLabel}'
+    WHEN ${a}opens_at IS NULL OR ${a}opens_at > NOW() THEN 'upcoming'
+    ELSE 'live' END`;
+}
+// A campaign's phase: inside an official election it's the election's
+// window; an independent campaign runs on its own starts_at/ends_at.
+const CAMPAIGN_PHASE_SQL = `CASE
+    WHEN c.status = 'withdrawn' THEN 'withdrawn'
+    WHEN c.election_id IS NOT NULL THEN ${electionPhaseSql("e", "ended")}
+    WHEN c.ends_at IS NOT NULL AND c.ends_at <= NOW() THEN 'ended'
+    WHEN c.starts_at IS NOT NULL AND c.starts_at > NOW() THEN 'upcoming'
+    ELSE 'live' END`;
+// $1 is always the viewer's engineer id (NULL for an admin session) so
+// each campaign row can carry "did this viewer already vote for it".
+const CAMPAIGN_SELECT_SQL = `
+  SELECT c.*,
+         e.title AS election_title,
+         e.winners_announced_at AS election_winners_announced_at,
+         ${electionPhaseSql("e")} AS election_phase,
+         cr.display_name AS creator_display_name, cr.name AS creator_name, cr.profile_photo AS creator_photo,
+         cr.title AS creator_title, cr.company AS creator_company, cr.discipline AS creator_discipline,
+         (SELECT COUNT(*) FROM campaign_votes v WHERE v.campaign_id = c.id)::int AS votes,
+         EXISTS(SELECT 1 FROM campaign_votes v WHERE v.campaign_id = c.id AND v.voter_id = $1::int) AS my_voted,
+         ${CAMPAIGN_PHASE_SQL} AS phase
+  FROM campaigns c
+  LEFT JOIN elections e ON e.id = c.election_id
+  JOIN engineers cr ON cr.id = c.creator_id`;
+
+function mapElection(e) {
+  return {
+    id: e.id,
+    title: e.title,
+    description: e.description,
+    positions: Array.isArray(e.positions) ? e.positions : [],
+    opensAt: e.opens_at,
+    closesAt: e.closes_at,
+    closedAt: e.closed_at,
+    phase: e.phase,
+    nominationsOpen: !!e.nominations_open,
+    autoVerify: !!e.auto_verify,
+    winnersAnnouncedAt: e.winners_announced_at,
+    candidateCount: Number(e.candidate_count || 0),
+    verifiedCount: Number(e.verified_count || 0),
+    pendingCount: Number(e.candidate_count || 0) - Number(e.verified_count || 0),
+    voteCount: Number(e.vote_count || 0),
+    voterCount: Number(e.voter_count || 0),
+    createdAt: e.created_at,
+  };
+}
+
+function mapCampaign(c, viewerId) {
+  const phase = c.phase;
+  const inElection = c.election_id != null;
+  return {
+    id: c.id,
+    electionId: c.election_id,
+    electionTitle: c.election_title || null,
+    electionPhase: c.election_phase || null,
+    electionWinnersAnnouncedAt: c.election_winners_announced_at || null,
+    creatorId: c.creator_id,
+    candidateName: c.creator_display_name || c.creator_name,
+    creatorTitle: c.creator_title,
+    creatorCompany: c.creator_company,
+    creatorDiscipline: c.creator_discipline,
+    name: c.name,
+    position: c.position,
+    bio: c.bio,
+    // A campaign without its own photo falls back to the candidate's
+    // profile photo — most members will have one before they have a
+    // campaign poster.
+    photoUrl: c.photo_url || c.creator_photo || null,
+    hasOwnPhoto: !!c.photo_url,
+    startsAt: c.starts_at,
+    endsAt: c.ends_at,
+    status: c.status,
+    verified: !!c.verified,
+    phase,
+    isLive: phase === "live",
+    // Inside an official election only admin-verified candidates are on
+    // the ballot; an independent campaign needs no verification.
+    canReceiveVotes: phase === "live" && (!inElection || !!c.verified),
+    votes: Number(c.votes || 0),
+    myVoted: !!c.my_voted,
+    isOwner: viewerId != null && c.creator_id === viewerId,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+  };
+}
+
+async function getAdminSessionSilently(sql, req) {
+  const token = getToken(req);
+  if (!token) return null;
+  const [s] = await sql`SELECT id, email FROM admin_sessions WHERE token = ${token} AND expires_at > NOW()`;
+  return s || null;
+}
+
+// Several voting reads are shared by the member pages and the admin
+// panel (which has an entirely separate token/table). Try the admin
+// token silently first — only requireSession's failure path writes a
+// response — then fall back to a member session for everyone else.
+async function requireMemberOrAdmin(sql, req, res) {
+  const admin = await getAdminSessionSilently(sql, req);
+  if (admin) return { admin, member: null, viewerId: null };
+  const member = await requireSession(sql, req, res);
+  if (!member) return null;
+  return { admin: null, member, viewerId: member.id };
+}
+
+function cleanPositions(input) {
+  const raw = Array.isArray(input) ? input : String(input || "").split(/\r?\n|,/);
+  const seen = new Set();
+  const out = [];
+  for (const p of raw) {
+    const s = String(p || "").trim().replace(/\s+/g, " ").slice(0, 120);
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out.slice(0, 20);
+}
+
+function parseInstant(value) {
+  if (value == null || value === "") return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function campaignLink(req, campaignId) {
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "engineer-hubb.vercel.app";
+  return `https://${host}/campaign.html?id=${campaignId}`;
+}
+
+async function notifyAllEngineers(sql, type, targetType, targetId) {
+  await sql`
+    INSERT INTO notifications (recipient_id, actor_id, type, target_type, target_id)
+    SELECT id, NULL, ${type}, ${targetType}, ${targetId} FROM engineers
+  `.catch(() => {});
 }
 
 // Body parsing is off (see the raw-body read at the top of the handler
@@ -2020,10 +2183,14 @@ export default async function handler(req, res) {
         const rows = await sql`
           SELECT n.id, n.type, n.target_type, n.target_id, n.is_read, n.created_at,
                  a.id AS actor_id, a.display_name, a.name, a.profile_photo,
-                 ev.title AS event_title
+                 ev.title AS event_title,
+                 el.title AS election_title,
+                 cp.position AS campaign_position
           FROM notifications n
           LEFT JOIN engineers a ON a.id = n.actor_id
           LEFT JOIN events ev ON ev.id = n.target_id AND n.target_type = 'event'
+          LEFT JOIN elections el ON el.id = n.target_id AND n.target_type = 'election'
+          LEFT JOIN campaigns cp ON cp.id = n.target_id AND n.target_type = 'campaign'
           WHERE n.recipient_id = ${session.id}
           ORDER BY n.created_at DESC
           LIMIT 100
@@ -2057,7 +2224,14 @@ export default async function handler(req, res) {
           // Broadcast/system notifications (no actor engineer) get their
           // own text built from the event itself, not the "X and Y did
           // something" actor-name template the rest of these use.
-          if (g.type === "event") {
+          const systemText = {
+            event: () => "New IEK Calendar event: " + (g.event_title || "View details"),
+            election_created: () => "New election: " + (g.election_title || "View details") + " — nominations are open",
+            election_open: () => "Voting is now open: " + (g.election_title || "Cast your vote"),
+            election_results: () => "Results announced: " + (g.election_title || "See the results"),
+            campaign_verified: () => "Your campaign for " + (g.campaign_position || "office") + " has been verified — you're on the ballot",
+          }[g.type];
+          if (systemText) {
             return {
               id: g.id,
               type: g.type,
@@ -2068,7 +2242,7 @@ export default async function handler(req, res) {
               actorId: null,
               actorPhoto: null,
               count: 1,
-              text: "New IEK Calendar event: " + (g.event_title || "View details"),
+              text: systemText(),
             };
           }
           const names = g.actorNames;
@@ -2674,8 +2848,965 @@ export default async function handler(req, res) {
       });
     }
 
+    // =========================================================
+    // VOTING — official elections (admin-run), member campaigns,
+    // one-vote-per-engineer ballots, live results, and campaign SMS.
+    // See migrations/016_elections.sql. This is a separate system from
+    // the original turnout tracker (voting.html / api/candidates.js),
+    // which is a check-in-desk tally and still holds the Aug-2026 data.
+    // =========================================================
+    if (action === "elections") {
+      if (req.method === "GET") {
+        const who = await requireMemberOrAdmin(sql, req, res);
+        if (!who) return;
+        const id = Number(req.query.id);
+        // Live elections first, then upcoming soonest-first, then closed
+        // most-recent-first — the same "which side of now" split the
+        // Calendar listing uses, so the one that matters is always on top.
+        const rows = await sql.query(
+          `SELECT e.*, ${electionPhaseSql("e")} AS phase,
+                  (SELECT COUNT(*) FROM campaigns c WHERE c.election_id = e.id AND c.status <> 'withdrawn')::int AS candidate_count,
+                  (SELECT COUNT(*) FROM campaigns c WHERE c.election_id = e.id AND c.status <> 'withdrawn' AND c.verified)::int AS verified_count,
+                  (SELECT COUNT(*) FROM campaign_votes v WHERE v.election_id = e.id)::int AS vote_count,
+                  (SELECT COUNT(DISTINCT v.voter_id) FROM campaign_votes v WHERE v.election_id = e.id)::int AS voter_count
+           FROM elections e
+           WHERE ($1::int IS NULL OR e.id = $1)
+           ORDER BY CASE ${electionPhaseSql("e")} WHEN 'live' THEN 0 WHEN 'upcoming' THEN 1 ELSE 2 END,
+                    (CASE WHEN ${electionPhaseSql("e")} = 'upcoming' THEN e.opens_at END) ASC NULLS LAST,
+                    (CASE WHEN ${electionPhaseSql("e")} = 'closed' THEN COALESCE(e.closed_at, e.closes_at) END) DESC NULLS LAST,
+                    e.id DESC`,
+          [Number.isInteger(id) && id > 0 ? id : null]
+        );
+        const [[totals], [indep]] = await Promise.all([
+          sql`SELECT COUNT(*)::int AS total FROM engineers`,
+          sql.query(
+            `SELECT COUNT(*) FILTER (WHERE ${CAMPAIGN_PHASE_SQL} = 'live')::int AS live_count,
+                    COUNT(*) FILTER (WHERE ${CAMPAIGN_PHASE_SQL} = 'upcoming')::int AS upcoming_count,
+                    COALESCE(SUM((SELECT COUNT(*) FROM campaign_votes v WHERE v.campaign_id = c.id)), 0)::int AS vote_count
+             FROM campaigns c LEFT JOIN elections e ON e.id = c.election_id
+             WHERE c.election_id IS NULL AND c.status <> 'withdrawn'`,
+            []
+          ),
+        ]);
+        return res.status(200).json({
+          elections: rows.map(mapElection),
+          independent: { liveCount: indep.live_count, upcomingCount: indep.upcoming_count, voteCount: indep.vote_count },
+          totalEngineers: totals.total,
+          serverTime: new Date().toISOString(),
+        });
+      }
+
+      const admin = await requireAdminSession(sql, req, res);
+      if (!admin) return;
+
+      if (req.method === "POST") {
+        const b = req.body || {};
+        const title = String(b.title || "").trim().slice(0, 200);
+        const description = String(b.description || "").trim().slice(0, 3000) || null;
+        const positions = cleanPositions(b.positions);
+        const opensAt = parseInstant(b.opensAt);
+        const closesAt = parseInstant(b.closesAt);
+        if (!title) return res.status(400).json({ error: "Give the election a title." });
+        if (!positions.length) return res.status(400).json({ error: "Add at least one position (e.g. President, Honorary Treasurer)." });
+        if (opensAt === undefined || closesAt === undefined) return res.status(400).json({ error: "Invalid date/time." });
+        if (opensAt && closesAt && closesAt <= opensAt) return res.status(400).json({ error: "Voting must close after it opens." });
+        const [row] = await sql.query(
+          `INSERT INTO elections (title, description, positions, opens_at, closes_at, nominations_open, auto_verify, created_by_email)
+           VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
+           RETURNING *, ${electionPhaseSql("")} AS phase`,
+          [title, description, JSON.stringify(positions), opensAt, closesAt, b.nominationsOpen !== false, !!b.autoVerify, admin.email]
+        );
+        await notifyAllEngineers(sql, "election_created", "election", row.id);
+        return res.status(201).json({ election: mapElection(row) });
+      }
+
+      if (req.method === "PUT") {
+        const b = req.body || {};
+        const id = Number(b.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid election id." });
+        const [existing] = await sql.query(`SELECT *, ${electionPhaseSql("")} AS phase FROM elections WHERE id = $1`, [id]);
+        if (!existing) return res.status(404).json({ error: "Election not found." });
+        const op = String(b.op || "update");
+
+        if (op === "open") {
+          // "Open voting now": start the window at this instant, clear any
+          // manual close, and drop a scheduled close that's already in the
+          // past (otherwise it would re-close the election immediately).
+          await sql`
+            UPDATE elections
+            SET opens_at = CASE WHEN opens_at IS NULL OR opens_at > NOW() THEN NOW() ELSE opens_at END,
+                closes_at = CASE WHEN closes_at IS NOT NULL AND closes_at <= NOW() THEN NULL ELSE closes_at END,
+                closed_at = NULL, updated_at = NOW()
+            WHERE id = ${id}
+          `;
+          if (existing.phase !== "live") await notifyAllEngineers(sql, "election_open", "election", id);
+        } else if (op === "close") {
+          await sql`UPDATE elections SET closed_at = NOW(), nominations_open = FALSE, updated_at = NOW() WHERE id = ${id}`;
+        } else if (op === "reopen") {
+          await sql`
+            UPDATE elections
+            SET closed_at = NULL,
+                closes_at = CASE WHEN closes_at IS NOT NULL AND closes_at <= NOW() THEN NULL ELSE closes_at END,
+                updated_at = NOW()
+            WHERE id = ${id}
+          `;
+        } else if (op === "announce") {
+          // Announcing results also closes voting if it's still open —
+          // a result can't be final while ballots are still being cast.
+          await sql`
+            UPDATE elections
+            SET winners_announced_at = NOW(), nominations_open = FALSE,
+                closed_at = COALESCE(closed_at, CASE WHEN closes_at IS NOT NULL AND closes_at <= NOW() THEN closes_at ELSE NOW() END),
+                updated_at = NOW()
+            WHERE id = ${id}
+          `;
+          if (!existing.winners_announced_at) await notifyAllEngineers(sql, "election_results", "election", id);
+        } else if (op === "unannounce") {
+          await sql`UPDATE elections SET winners_announced_at = NULL, updated_at = NOW() WHERE id = ${id}`;
+        } else if (op === "update") {
+          const title = String(b.title ?? existing.title).trim().slice(0, 200);
+          const description = b.description === undefined ? existing.description : String(b.description || "").trim().slice(0, 3000) || null;
+          const positions = b.positions === undefined ? existing.positions : cleanPositions(b.positions);
+          const opensAt = b.opensAt === undefined ? existing.opens_at : parseInstant(b.opensAt);
+          const closesAt = b.closesAt === undefined ? existing.closes_at : parseInstant(b.closesAt);
+          if (!title) return res.status(400).json({ error: "Give the election a title." });
+          if (!positions.length) return res.status(400).json({ error: "Add at least one position." });
+          if (opensAt === undefined || closesAt === undefined) return res.status(400).json({ error: "Invalid date/time." });
+          if (opensAt && closesAt && new Date(closesAt) <= new Date(opensAt)) return res.status(400).json({ error: "Voting must close after it opens." });
+          // A position can't be removed out from under campaigns already
+          // running for it — those campaigns would silently drop off the ballot.
+          const inUse = await sql`SELECT DISTINCT LOWER(position) AS p FROM campaigns WHERE election_id = ${id} AND status <> 'withdrawn'`;
+          const keep = new Set(positions.map((p) => p.toLowerCase()));
+          const missing = inUse.filter((r) => !keep.has(r.p));
+          if (missing.length) return res.status(409).json({ error: `Can't remove a position that already has candidates: ${missing.map((m) => m.p).join(", ")}.` });
+          await sql.query(
+            `UPDATE elections SET title = $2, description = $3, positions = $4::jsonb, opens_at = $5, closes_at = $6,
+                    nominations_open = $7, auto_verify = $8, updated_at = NOW()
+             WHERE id = $1`,
+            [id, title, description, JSON.stringify(positions), opensAt, closesAt,
+             b.nominationsOpen === undefined ? existing.nominations_open : !!b.nominationsOpen,
+             b.autoVerify === undefined ? existing.auto_verify : !!b.autoVerify]
+          );
+        } else {
+          return res.status(400).json({ error: "Unknown op." });
+        }
+        const [row] = await sql.query(
+          `SELECT e.*, ${electionPhaseSql("e")} AS phase,
+                  (SELECT COUNT(*) FROM campaigns c WHERE c.election_id = e.id AND c.status <> 'withdrawn')::int AS candidate_count,
+                  (SELECT COUNT(*) FROM campaigns c WHERE c.election_id = e.id AND c.status <> 'withdrawn' AND c.verified)::int AS verified_count,
+                  (SELECT COUNT(*) FROM campaign_votes v WHERE v.election_id = e.id)::int AS vote_count,
+                  (SELECT COUNT(DISTINCT v.voter_id) FROM campaign_votes v WHERE v.election_id = e.id)::int AS voter_count
+           FROM elections e WHERE e.id = $1`,
+          [id]
+        );
+        return res.status(200).json({ election: mapElection(row) });
+      }
+
+      if (req.method === "DELETE") {
+        const id = Number(req.query.id || (req.body || {}).id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid election id." });
+        const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM campaign_votes WHERE election_id = ${id}`;
+        if (count > 0) return res.status(409).json({ error: `This election has ${count} vote${count === 1 ? "" : "s"} recorded and can't be deleted. Close it instead.` });
+        await sql`DELETE FROM notifications WHERE target_type = 'election' AND target_id = ${id}`;
+        await sql`DELETE FROM elections WHERE id = ${id}`;
+        return res.status(200).json({ success: true });
+      }
+
+      res.setHeader("Allow", "GET, POST, PUT, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    if (action === "campaigns") {
+      if (req.method === "GET") {
+        const who = await requireMemberOrAdmin(sql, req, res);
+        if (!who) return;
+        const viewerId = who.viewerId;
+        const id = Number(req.query.id);
+        if (req.query.id !== undefined) {
+          if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid campaign id." });
+          const [row] = await sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.id = $2`, [viewerId, id]);
+          if (!row) return res.status(404).json({ error: "Campaign not found." });
+          const campaign = mapCampaign(row, viewerId);
+          // Inside an election, "already voted in this position" matters as
+          // much as "already voted for this campaign" — the ballot locks
+          // the whole position once any candidate in it has been chosen.
+          let myVoteCampaignId = null;
+          if (viewerId) {
+            const [mine] = campaign.electionId
+              ? await sql`SELECT campaign_id FROM campaign_votes WHERE voter_id = ${viewerId} AND election_id = ${campaign.electionId} AND LOWER(position) = LOWER(${campaign.position})`
+              : await sql`SELECT campaign_id FROM campaign_votes WHERE voter_id = ${viewerId} AND campaign_id = ${id}`;
+            myVoteCampaignId = mine ? mine.campaign_id : null;
+          }
+          const [[{ total }], [electionRow]] = await Promise.all([
+            sql`SELECT COUNT(*)::int AS total FROM engineers`,
+            campaign.electionId
+              ? sql.query(`SELECT e.*, ${electionPhaseSql("e")} AS phase FROM elections e WHERE e.id = $1`, [campaign.electionId])
+              : Promise.resolve([null]),
+          ]);
+          return res.status(200).json({
+            campaign,
+            election: electionRow ? mapElection(electionRow) : null,
+            myVoteCampaignId,
+            totalEngineers: total,
+            serverTime: new Date().toISOString(),
+          });
+        }
+
+        const where = ["c.status <> 'withdrawn'"];
+        const params = [viewerId];
+        if (req.query.mine === "1" && viewerId) {
+          where.pop();
+          params.push(viewerId);
+          where.push(`c.creator_id = $${params.length}`);
+        } else if (req.query.electionId) {
+          const eid = Number(req.query.electionId);
+          if (!Number.isInteger(eid)) return res.status(400).json({ error: "Invalid election id." });
+          params.push(eid);
+          where.push(`c.election_id = $${params.length}`);
+        } else if (req.query.scope === "independent") {
+          where.push("c.election_id IS NULL");
+          if (req.query.includeEnded !== "1") where.push(`${CAMPAIGN_PHASE_SQL} <> 'ended'`);
+        } else if (req.query.includeEnded !== "1") {
+          where.push(`${CAMPAIGN_PHASE_SQL} <> 'ended'`);
+        }
+        if (req.query.position) {
+          params.push(String(req.query.position));
+          where.push(`LOWER(c.position) = LOWER($${params.length})`);
+        }
+        const rows = await sql.query(
+          `${CAMPAIGN_SELECT_SQL} WHERE ${where.join(" AND ")}
+           ORDER BY CASE ${CAMPAIGN_PHASE_SQL} WHEN 'live' THEN 0 WHEN 'upcoming' THEN 1 ELSE 2 END, c.verified DESC, c.created_at ASC
+           LIMIT 200`,
+          params
+        );
+        return res.status(200).json({ campaigns: rows.map((r) => mapCampaign(r, viewerId)), serverTime: new Date().toISOString() });
+      }
+
+      if (req.method === "POST") {
+        const session = await requireSession(sql, req, res);
+        if (!session) return;
+        const b = req.body || {};
+        const name = String(b.name || "").trim().replace(/\s+/g, " ").slice(0, 150);
+        let position = String(b.position || "").trim().replace(/\s+/g, " ").slice(0, 120);
+        const bio = String(b.bio || "").trim().slice(0, 3000) || null;
+        const photoUrl = String(b.photoUrl || "").trim().slice(0, 500) || null;
+        if (name.length < 3) return res.status(400).json({ error: "Give your campaign a name (e.g. \"Jane for Treasurer\")." });
+        if (position.length < 2) return res.status(400).json({ error: "Choose the position you're running for." });
+        if (photoUrl && !/^https:\/\//.test(photoUrl)) return res.status(400).json({ error: "Invalid photo." });
+
+        let electionId = null;
+        let verified = false;
+        let startsAt = null;
+        let endsAt = null;
+        if (b.electionId) {
+          electionId = Number(b.electionId);
+          if (!Number.isInteger(electionId)) return res.status(400).json({ error: "Invalid election." });
+          const [election] = await sql.query(`SELECT *, ${electionPhaseSql("")} AS phase FROM elections WHERE id = $1`, [electionId]);
+          if (!election) return res.status(404).json({ error: "That election no longer exists." });
+          if (election.phase === "closed") return res.status(409).json({ error: "That election has closed." });
+          if (!election.nominations_open) return res.status(409).json({ error: "Nominations for that election are closed." });
+          const canonical = (Array.isArray(election.positions) ? election.positions : []).find((p) => p.toLowerCase() === position.toLowerCase());
+          if (!canonical) return res.status(400).json({ error: "Pick one of the positions in this election." });
+          position = canonical;
+          verified = !!election.auto_verify;
+        } else {
+          startsAt = parseInstant(b.startsAt) || new Date();
+          endsAt = parseInstant(b.endsAt);
+          if (startsAt === undefined || endsAt === undefined) return res.status(400).json({ error: "Invalid campaign dates." });
+          if (!endsAt) return res.status(400).json({ error: "Set when your campaign ends." });
+          if (endsAt <= new Date()) return res.status(400).json({ error: "The campaign end date must be in the future." });
+          if (endsAt <= startsAt) return res.status(400).json({ error: "The campaign must end after it starts." });
+          if (endsAt - startsAt > CAMPAIGN_MAX_DAYS * 86400000) return res.status(400).json({ error: `A campaign can run for at most ${CAMPAIGN_MAX_DAYS} days.` });
+        }
+
+        let created;
+        try {
+          [created] = await sql`
+            INSERT INTO campaigns (election_id, creator_id, name, position, bio, photo_url, starts_at, ends_at, verified, verified_at)
+            VALUES (${electionId}, ${session.id}, ${name}, ${position}, ${bio}, ${photoUrl}, ${startsAt}, ${endsAt}, ${verified}, ${verified ? new Date() : null})
+            RETURNING id
+          `;
+        } catch (err) {
+          if (err && err.code === "23505") return res.status(409).json({ error: "You already have a campaign for this position." });
+          throw err;
+        }
+        await logActivity(sql, session.id, "campaign", `${session.display_name || session.name} launched a campaign for ${position}`);
+        const [row] = await sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.id = $2`, [session.id, created.id]);
+        return res.status(201).json({ campaign: mapCampaign(row, session.id) });
+      }
+
+      if (req.method === "PUT") {
+        const b = req.body || {};
+        const id = Number(b.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid campaign id." });
+        const admin = await getAdminSessionSilently(sql, req);
+        if (admin) {
+          // Admin's only edit is verification — the candidate owns everything else.
+          if (typeof b.verified !== "boolean") return res.status(400).json({ error: "verified must be true or false." });
+          const [updated] = await sql`
+            UPDATE campaigns
+            SET verified = ${b.verified}, verified_by_email = ${b.verified ? admin.email : null}, verified_at = ${b.verified ? new Date() : null}, updated_at = NOW()
+            WHERE id = ${id}
+            RETURNING creator_id, position
+          `;
+          if (!updated) return res.status(404).json({ error: "Campaign not found." });
+          if (b.verified) {
+            await sql`
+              INSERT INTO notifications (recipient_id, actor_id, type, target_type, target_id)
+              VALUES (${updated.creator_id}, NULL, 'campaign_verified', 'campaign', ${id})
+            `.catch(() => {});
+          }
+          const [row] = await sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.id = $2`, [null, id]);
+          return res.status(200).json({ campaign: mapCampaign(row, null) });
+        }
+
+        const session = await requireSession(sql, req, res);
+        if (!session) return;
+        const [existing] = await sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.id = $2`, [session.id, id]);
+        if (!existing) return res.status(404).json({ error: "Campaign not found." });
+        if (existing.creator_id !== session.id) return res.status(403).json({ error: "Only the candidate can edit this campaign." });
+        if (existing.status === "withdrawn") return res.status(409).json({ error: "This campaign has been withdrawn." });
+
+        const name = b.name === undefined ? existing.name : String(b.name || "").trim().replace(/\s+/g, " ").slice(0, 150);
+        const bio = b.bio === undefined ? existing.bio : String(b.bio || "").trim().slice(0, 3000) || null;
+        const photoUrl = b.photoUrl === undefined ? existing.photo_url : String(b.photoUrl || "").trim().slice(0, 500) || null;
+        let position = existing.position;
+        let endsAt = existing.ends_at;
+        if (name.length < 3) return res.status(400).json({ error: "Give your campaign a name." });
+        if (photoUrl && !/^https:\/\//.test(photoUrl)) return res.status(400).json({ error: "Invalid photo." });
+        if (b.position !== undefined && String(b.position).trim().toLowerCase() !== existing.position.toLowerCase()) {
+          if (existing.votes > 0) return res.status(409).json({ error: "The position can't change once votes have been cast." });
+          position = String(b.position).trim().replace(/\s+/g, " ").slice(0, 120);
+          if (position.length < 2) return res.status(400).json({ error: "Choose a position." });
+          if (existing.election_id) {
+            const [election] = await sql`SELECT positions FROM elections WHERE id = ${existing.election_id}`;
+            const canonical = (election && Array.isArray(election.positions) ? election.positions : []).find((p) => p.toLowerCase() === position.toLowerCase());
+            if (!canonical) return res.status(400).json({ error: "Pick one of the positions in this election." });
+            position = canonical;
+          }
+        }
+        if (!existing.election_id && b.endsAt !== undefined) {
+          endsAt = parseInstant(b.endsAt);
+          if (endsAt === undefined || !endsAt) return res.status(400).json({ error: "Invalid end date." });
+          if (endsAt <= new Date()) return res.status(400).json({ error: "The campaign end date must be in the future." });
+          if (endsAt - new Date(existing.starts_at) > CAMPAIGN_MAX_DAYS * 86400000) return res.status(400).json({ error: `A campaign can run for at most ${CAMPAIGN_MAX_DAYS} days.` });
+        }
+        try {
+          await sql`
+            UPDATE campaigns SET name = ${name}, bio = ${bio}, photo_url = ${photoUrl}, position = ${position}, ends_at = ${endsAt}, updated_at = NOW()
+            WHERE id = ${id}
+          `;
+        } catch (err) {
+          if (err && err.code === "23505") return res.status(409).json({ error: "You already have a campaign for that position." });
+          throw err;
+        }
+        const [row] = await sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.id = $2`, [session.id, id]);
+        return res.status(200).json({ campaign: mapCampaign(row, session.id) });
+      }
+
+      if (req.method === "DELETE") {
+        const id = Number(req.query.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid campaign id." });
+        const admin = await getAdminSessionSilently(sql, req);
+        let session = null;
+        if (!admin) {
+          session = await requireSession(sql, req, res);
+          if (!session) return;
+        }
+        const [existing] = await sql`
+          SELECT c.id, c.creator_id, c.status, (SELECT COUNT(*) FROM campaign_votes v WHERE v.campaign_id = c.id)::int AS votes
+          FROM campaigns c WHERE c.id = ${id}
+        `;
+        if (!existing) return res.status(404).json({ error: "Campaign not found." });
+        if (session && existing.creator_id !== session.id) return res.status(403).json({ error: "Only the candidate can remove this campaign." });
+        if (req.query.withdraw === "1") {
+          // Withdrawing keeps the ballots already cast on record (an
+          // audit trail matters more than a clean table) but takes the
+          // campaign off the ballot and out of the results.
+          await sql`UPDATE campaigns SET status = 'withdrawn', updated_at = NOW() WHERE id = ${id}`;
+          return res.status(200).json({ success: true, withdrawn: true });
+        }
+        if (existing.votes > 0) {
+          return res.status(409).json({ error: `This campaign already has ${existing.votes} vote${existing.votes === 1 ? "" : "s"} and can't be deleted. You can withdraw it instead.`, canWithdraw: true });
+        }
+        await sql`DELETE FROM notifications WHERE target_type = 'campaign' AND target_id = ${id}`;
+        await sql`DELETE FROM campaigns WHERE id = ${id}`;
+        return res.status(200).json({ success: true, deleted: true });
+      }
+
+      res.setHeader("Allow", "GET, POST, PUT, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    if (action === "upload-campaign-photo") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const contentType = req.headers["content-type"] || "";
+      if (!contentType.startsWith("image/")) return res.status(400).json({ error: "Only image uploads are allowed." });
+      const body = await readRawBody(req);
+      if (!body.length) return res.status(400).json({ error: "No image data received." });
+      if (body.length > MAX_PHOTO_BYTES) return res.status(413).json({ error: "Image is too large. Keep it under 10MB." });
+      const ext = contentType.split("/")[1]?.replace(/[^a-z0-9]/gi, "") || "jpg";
+      const blob = await put(`campaign-photos/${session.id}-${Date.now()}.${ext}`, body, { access: "public", contentType });
+      return res.status(200).json({ url: blob.url });
+    }
+
+    if (action === "ballot") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM engineers`;
+
+      if (req.query.electionId) {
+        const eid = Number(req.query.electionId);
+        if (!Number.isInteger(eid)) return res.status(400).json({ error: "Invalid election id." });
+        const [election] = await sql.query(
+          `SELECT e.*, ${electionPhaseSql("e")} AS phase,
+                  (SELECT COUNT(*) FROM campaigns c WHERE c.election_id = e.id AND c.status <> 'withdrawn')::int AS candidate_count,
+                  (SELECT COUNT(*) FROM campaigns c WHERE c.election_id = e.id AND c.status <> 'withdrawn' AND c.verified)::int AS verified_count,
+                  (SELECT COUNT(*) FROM campaign_votes v WHERE v.election_id = e.id)::int AS vote_count,
+                  (SELECT COUNT(DISTINCT v.voter_id) FROM campaign_votes v WHERE v.election_id = e.id)::int AS voter_count
+           FROM elections e WHERE e.id = $1`,
+          [eid]
+        );
+        if (!election) return res.status(404).json({ error: "Election not found." });
+        // Ballot order is by verification then entry order — deliberately
+        // NOT by vote count, so the ballot itself never nudges a voter
+        // toward whoever is currently ahead. Ranking lives on the results page.
+        const [rows, myVotes] = await Promise.all([
+          sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.election_id = $2 AND c.status <> 'withdrawn' ORDER BY c.verified DESC, c.created_at ASC`, [session.id, eid]),
+          sql`SELECT campaign_id, LOWER(position) AS position FROM campaign_votes WHERE voter_id = ${session.id} AND election_id = ${eid}`,
+        ]);
+        const mineByPosition = new Map(myVotes.map((v) => [v.position, v.campaign_id]));
+        const campaigns = rows.map((r) => mapCampaign(r, session.id));
+        const positions = mapElection(election).positions.map((p) => ({
+          position: p,
+          myVoteCampaignId: mineByPosition.get(p.toLowerCase()) || null,
+          candidates: campaigns.filter((c) => c.position.toLowerCase() === p.toLowerCase()),
+        }));
+        return res.status(200).json({
+          election: mapElection(election),
+          phase: election.phase,
+          positions,
+          myVoteCount: myVotes.length,
+          totalEngineers: total,
+          serverTime: new Date().toISOString(),
+        });
+      }
+
+      // Independent campaigns: one vote per engineer per campaign, each
+      // campaign on its own clock. Grouped by position for display only.
+      const rows = await sql.query(
+        `${CAMPAIGN_SELECT_SQL} WHERE c.election_id IS NULL AND c.status <> 'withdrawn' AND ${CAMPAIGN_PHASE_SQL} <> 'ended'
+         ORDER BY CASE ${CAMPAIGN_PHASE_SQL} WHEN 'live' THEN 0 ELSE 1 END, c.created_at ASC`,
+        [session.id]
+      );
+      const campaigns = rows.map((r) => mapCampaign(r, session.id));
+      const byPosition = new Map();
+      for (const c of campaigns) {
+        const key = c.position.toLowerCase();
+        if (!byPosition.has(key)) byPosition.set(key, { position: c.position, myVoteCampaignId: null, candidates: [] });
+        byPosition.get(key).candidates.push(c);
+      }
+      const [{ voters }] = await sql`
+        SELECT COUNT(DISTINCT v.voter_id)::int AS voters FROM campaign_votes v JOIN campaigns c ON c.id = v.campaign_id
+        WHERE c.election_id IS NULL AND c.status <> 'withdrawn'
+      `;
+      return res.status(200).json({
+        election: null,
+        phase: campaigns.some((c) => c.isLive) ? "live" : campaigns.length ? "upcoming" : "none",
+        positions: Array.from(byPosition.values()),
+        myVoteCount: campaigns.filter((c) => c.myVoted).length,
+        voterCount: voters,
+        totalEngineers: total,
+        serverTime: new Date().toISOString(),
+      });
+    }
+
+    if (action === "vote") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const campaignId = Number((req.body || {}).campaignId);
+      if (!Number.isInteger(campaignId)) return res.status(400).json({ error: "Invalid campaign." });
+      const [row] = await sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.id = $2`, [session.id, campaignId]);
+      if (!row) return res.status(404).json({ error: "Campaign not found." });
+      const campaign = mapCampaign(row, session.id);
+      if (campaign.status === "withdrawn") return res.status(409).json({ error: "This campaign has been withdrawn." });
+      if (campaign.phase === "upcoming") return res.status(409).json({ error: "Voting hasn't opened yet." });
+      if (campaign.phase === "ended") return res.status(409).json({ error: "Voting has closed." });
+      if (!campaign.canReceiveVotes) return res.status(409).json({ error: "This candidate hasn't been verified yet, so votes can't be cast for them." });
+
+      // The two unique indexes on campaign_votes (voter+campaign, and
+      // voter+election+position) are what actually enforce "one vote, no
+      // changes" — under two simultaneous taps only one INSERT can win,
+      // and ON CONFLICT DO NOTHING turns the loser into a clean "already
+      // voted" instead of a 500. No read-then-write window at all.
+      const inserted = await sql`
+        INSERT INTO campaign_votes (campaign_id, voter_id, election_id, position, voter_ip)
+        VALUES (${campaignId}, ${session.id}, ${campaign.electionId}, ${campaign.position}, ${getClientIp(req)})
+        ON CONFLICT DO NOTHING
+        RETURNING id
+      `;
+      if (!inserted.length) {
+        const [prior] = campaign.electionId
+          ? await sql`SELECT v.campaign_id, c.name, cr.display_name, cr.name AS creator_name FROM campaign_votes v JOIN campaigns c ON c.id = v.campaign_id JOIN engineers cr ON cr.id = c.creator_id WHERE v.voter_id = ${session.id} AND v.election_id = ${campaign.electionId} AND LOWER(v.position) = LOWER(${campaign.position})`
+          : await sql`SELECT v.campaign_id, c.name, cr.display_name, cr.name AS creator_name FROM campaign_votes v JOIN campaigns c ON c.id = v.campaign_id JOIN engineers cr ON cr.id = c.creator_id WHERE v.voter_id = ${session.id} AND v.campaign_id = ${campaignId}`;
+        const who = prior ? prior.display_name || prior.creator_name : "a candidate";
+        return res.status(409).json({
+          error: prior && prior.campaign_id === campaignId
+            ? `You've already voted for ${who}. Votes can't be changed.`
+            : `You've already voted for ${who} for ${campaign.position}. Votes can't be changed.`,
+          myVoteCampaignId: prior ? prior.campaign_id : null,
+        });
+      }
+      await logAudit(sql, "HUB_VOTE", session.id, getClientIp(req)).catch(() => {});
+      const [{ votes }] = await sql`SELECT COUNT(*)::int AS votes FROM campaign_votes WHERE campaign_id = ${campaignId}`;
+      return res.status(200).json({ success: true, campaign: { id: campaignId, votes }, myVoteCampaignId: campaignId });
+    }
+
+    if (action === "election-results") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const who = await requireMemberOrAdmin(sql, req, res);
+      if (!who) return;
+      const [{ total }] = await sql`SELECT COUNT(*)::int AS total FROM engineers`;
+      let election = null;
+      let rows;
+      let voterCount = 0;
+      let lastVoteAt = null;
+      let positionOrder;
+      if (req.query.electionId) {
+        const eid = Number(req.query.electionId);
+        if (!Number.isInteger(eid)) return res.status(400).json({ error: "Invalid election id." });
+        const [e] = await sql.query(`SELECT e.*, ${electionPhaseSql("e")} AS phase FROM elections e WHERE e.id = $1`, [eid]);
+        if (!e) return res.status(404).json({ error: "Election not found." });
+        election = mapElection(e);
+        positionOrder = election.positions;
+        const [campaignRows, [agg]] = await Promise.all([
+          sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.election_id = $2 AND c.status <> 'withdrawn'`, [null, eid]),
+          sql`SELECT COUNT(DISTINCT voter_id)::int AS voters, MAX(created_at) AS last_vote_at FROM campaign_votes WHERE election_id = ${eid}`,
+        ]);
+        rows = campaignRows;
+        voterCount = agg.voters;
+        lastVoteAt = agg.last_vote_at;
+      } else {
+        const [campaignRows, [agg]] = await Promise.all([
+          sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.election_id IS NULL AND c.status <> 'withdrawn' AND (${CAMPAIGN_PHASE_SQL} <> 'ended' OR c.ends_at > NOW() - INTERVAL '30 days')`, [null]),
+          sql`SELECT COUNT(DISTINCT v.voter_id)::int AS voters, MAX(v.created_at) AS last_vote_at FROM campaign_votes v JOIN campaigns c ON c.id = v.campaign_id WHERE c.election_id IS NULL AND c.status <> 'withdrawn'`,
+        ]);
+        rows = campaignRows;
+        voterCount = agg.voters;
+        lastVoteAt = agg.last_vote_at;
+        positionOrder = [];
+        for (const r of rows) if (!positionOrder.some((p) => p.toLowerCase() === r.position.toLowerCase())) positionOrder.push(r.position);
+      }
+      const campaigns = rows.map((r) => mapCampaign(r, null));
+      const announced = !!(election && election.winnersAnnouncedAt);
+      const positions = positionOrder.map((p) => {
+        const cands = campaigns
+          .filter((c) => c.position.toLowerCase() === p.toLowerCase())
+          .sort((a, b) => b.votes - a.votes || new Date(a.createdAt) - new Date(b.createdAt));
+        const totalVotes = cands.reduce((s, c) => s + c.votes, 0);
+        const top = cands.length ? cands[0].votes : 0;
+        const leaders = cands.filter((c) => c.votes === top && top > 0);
+        return {
+          position: p,
+          totalVotes,
+          candidates: cands.map((c) => ({
+            id: c.id,
+            name: c.name,
+            candidateName: c.candidateName,
+            photoUrl: c.photoUrl,
+            verified: c.verified,
+            phase: c.phase,
+            votes: c.votes,
+            percent: totalVotes ? Math.round((c.votes / totalVotes) * 1000) / 10 : 0,
+            isLeader: c.votes === top && top > 0,
+            isTie: leaders.length > 1 && c.votes === top && top > 0,
+            isWinner: announced && leaders.length === 1 && c.votes === top && top > 0,
+          })),
+        };
+      });
+      const totalVotes = positions.reduce((s, p) => s + p.totalVotes, 0);
+      const payload = {
+        election,
+        phase: election ? election.phase : campaigns.some((c) => c.isLive) ? "live" : campaigns.length ? "closed" : "none",
+        positions,
+        totalVotes,
+        voterCount,
+        totalEngineers: total,
+        turnoutPercent: total ? Math.round((voterCount / total) * 1000) / 10 : 0,
+        lastVoteAt,
+        winnersAnnouncedAt: election ? election.winnersAnnouncedAt : null,
+        serverTime: new Date().toISOString(),
+      };
+
+      if (req.query.format === "csv") {
+        const esc = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+        const lines = [["Position", "Candidate", "Campaign", "Votes", "Percent of position", "Verified", "Status"].map(esc).join(",")];
+        for (const p of positions) {
+          for (const c of p.candidates) {
+            lines.push([p.position, c.candidateName, c.name, c.votes, c.percent + "%", c.verified ? "Yes" : "No", c.isWinner ? "Winner" : c.isTie ? "Tied lead" : c.isLeader ? "Leading" : ""].map(esc).join(","));
+          }
+        }
+        lines.push("");
+        lines.push([esc("Total votes"), esc(totalVotes)].join(","));
+        lines.push([esc("Engineers who voted"), esc(voterCount)].join(","));
+        lines.push([esc("Registered engineers"), esc(total)].join(","));
+        lines.push([esc("Turnout"), esc(payload.turnoutPercent + "%")].join(","));
+        lines.push([esc("Exported at"), esc(new Date().toISOString())].join(","));
+        const fname = (election ? election.title : "independent-campaigns").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="results-${fname}.csv"`);
+        return res.status(200).send("﻿" + lines.join("\r\n"));
+      }
+      return res.status(200).json(payload);
+    }
+
+    // ---------- Campaign SMS (Sozuri, via api/_sozuri.js) ----------
+    if (action === "campaign-sms-recipients") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const campaignId = Number(req.query.campaignId);
+      if (!Number.isInteger(campaignId)) return res.status(400).json({ error: "Invalid campaign." });
+      const [campaign] = await sql`SELECT id, creator_id, election_id, position FROM campaigns WHERE id = ${campaignId}`;
+      if (!campaign) return res.status(404).json({ error: "Campaign not found." });
+      if (campaign.creator_id !== session.id) return res.status(403).json({ error: "Only the candidate can message on behalf of this campaign." });
+      // "Has voted" is scoped to the contest, not the candidate: inside an
+      // election it means "has cast a ballot for this position" (for
+      // anyone), which is turnout information, not how they voted — the
+      // candidate never learns who chose whom. An independent campaign is
+      // its own contest, so there it means voted for this campaign.
+      const rows = await sql`
+        SELECT e.id, COALESCE(NULLIF(e.display_name, ''), e.name) AS name, e.discipline,
+               (e.phone IS NOT NULL AND e.phone <> '') AS has_phone,
+               EXISTS(
+                 SELECT 1 FROM campaign_votes v
+                 WHERE v.voter_id = e.id AND (
+                   (${campaign.election_id}::int IS NOT NULL AND v.election_id = ${campaign.election_id} AND LOWER(v.position) = LOWER(${campaign.position}))
+                   OR (${campaign.election_id}::int IS NULL AND v.campaign_id = ${campaignId})
+                 )
+               ) AS has_voted
+        FROM engineers e
+        ORDER BY name
+      `;
+      const disciplines = Array.from(new Set(rows.map((r) => r.discipline).filter(Boolean))).sort();
+      return res.status(200).json({
+        engineers: rows.map((r) => ({ id: r.id, name: r.name, discipline: r.discipline, hasPhone: !!r.has_phone, hasVoted: !!r.has_voted })),
+        disciplines,
+        counts: {
+          all: rows.length,
+          withPhone: rows.filter((r) => r.has_phone).length,
+          notVoted: rows.filter((r) => r.has_phone && !r.has_voted).length,
+          voted: rows.filter((r) => r.has_voted).length,
+        },
+        smsConfigured: smsIsConfigured(),
+      });
+    }
+
+    if (action === "campaign-sms") {
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      if (req.method === "GET") {
+        const campaignId = Number(req.query.campaignId);
+        if (!Number.isInteger(campaignId)) return res.status(400).json({ error: "Invalid campaign." });
+        const [campaign] = await sql`SELECT id, creator_id FROM campaigns WHERE id = ${campaignId}`;
+        if (!campaign) return res.status(404).json({ error: "Campaign not found." });
+        if (campaign.creator_id !== session.id) return res.status(403).json({ error: "Only the candidate can see this campaign's messages." });
+        const [batches, [{ today }]] = await Promise.all([
+          sql`
+            SELECT b.*,
+                   (SELECT COUNT(*) FROM campaign_sms_recipients r WHERE r.batch_id = b.id AND r.status IN ('pending', 'sending'))::int AS open_count,
+                   (SELECT COUNT(*) FROM campaign_sms_recipients r WHERE r.batch_id = b.id AND r.status = 'sent')::int AS live_sent,
+                   (SELECT COUNT(*) FROM campaign_sms_recipients r WHERE r.batch_id = b.id AND r.status = 'failed')::int AS live_failed,
+                   (SELECT COUNT(*) FROM campaign_sms_recipients r WHERE r.batch_id = b.id AND r.status = 'invalid_phone')::int AS live_invalid
+            FROM campaign_sms_batches b WHERE b.campaign_id = ${campaignId} ORDER BY b.created_at DESC LIMIT 50
+          `,
+          sql`SELECT COUNT(*)::int AS today FROM campaign_sms_batches WHERE campaign_id = ${campaignId} AND status <> 'cancelled' AND created_at > NOW() - INTERVAL '24 hours'`,
+        ]);
+        return res.status(200).json({
+          batches: batches.map((b) => ({
+            id: b.id,
+            message: b.message,
+            recipientMode: b.recipient_mode,
+            recipientFilter: b.recipient_filter,
+            recipientsCount: b.recipients_count,
+            sentCount: b.live_sent,
+            failedCount: b.live_failed,
+            invalidCount: b.live_invalid,
+            openCount: b.open_count,
+            status: b.status,
+            scheduledFor: b.scheduled_for,
+            startedAt: b.started_at,
+            completedAt: b.completed_at,
+            createdAt: b.created_at,
+          })),
+          remainingToday: Math.max(0, CAMPAIGN_SMS_DAILY_LIMIT - today),
+          dailyLimit: CAMPAIGN_SMS_DAILY_LIMIT,
+          maxChars: CAMPAIGN_SMS_MAX_CHARS,
+          smsConfigured: smsIsConfigured(),
+        });
+      }
+
+      if (req.method === "POST") {
+        const b = req.body || {};
+        const campaignId = Number(b.campaignId);
+        if (!Number.isInteger(campaignId)) return res.status(400).json({ error: "Invalid campaign." });
+        const [row] = await sql.query(`${CAMPAIGN_SELECT_SQL} WHERE c.id = $2`, [session.id, campaignId]);
+        if (!row) return res.status(404).json({ error: "Campaign not found." });
+        const campaign = mapCampaign(row, session.id);
+        if (!campaign.isOwner) return res.status(403).json({ error: "Only the candidate can message on behalf of this campaign." });
+        if (campaign.status === "withdrawn" || campaign.phase === "ended") return res.status(409).json({ error: "This campaign is no longer running." });
+        if (campaign.electionId && !campaign.verified) return res.status(409).json({ error: "Your candidacy has to be verified by the election admin before you can send SMS." });
+        if (!smsIsConfigured()) return res.status(400).json({ error: "SMS isn't configured on the server yet (SOZURI_PROJECT_ID / SOZURI_API_KEY)." });
+
+        const [{ today }] = await sql`SELECT COUNT(*)::int AS today FROM campaign_sms_batches WHERE campaign_id = ${campaignId} AND status <> 'cancelled' AND created_at > NOW() - INTERVAL '24 hours'`;
+        if (today >= CAMPAIGN_SMS_DAILY_LIMIT) return res.status(429).json({ error: `You've reached the limit of ${CAMPAIGN_SMS_DAILY_LIMIT} SMS sends per campaign in 24 hours.` });
+
+        const text = String(b.message || "").replace(/\r\n/g, "\n").trim();
+        if (!text) return res.status(400).json({ error: "Write your message first." });
+        if (text.length > CAMPAIGN_SMS_MAX_CHARS) return res.status(400).json({ error: `Keep the message under ${CAMPAIGN_SMS_MAX_CHARS} characters.` });
+        // The sender ID on the wire is the account's registered
+        // alphanumeric ID (SOZURI_SENDER) — carriers don't allow that to
+        // change per message — so "sent from the candidate's name" is done
+        // in the text itself: the candidate signs off, with a link straight
+        // to their campaign page.
+        const signature = b.includeSignature === false ? "" : `\n- ${campaign.candidateName}, ${campaign.position}. ${campaignLink(req, campaignId)}`;
+        const message = text + signature;
+
+        const mode = ["all", "discipline", "individual", "not_voted"].includes(b.mode) ? b.mode : "all";
+        let recipients;
+        let filterLabel = null;
+        if (mode === "individual") {
+          const ids = Array.from(new Set((Array.isArray(b.engineerIds) ? b.engineerIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0)));
+          if (!ids.length) return res.status(400).json({ error: "Select at least one engineer." });
+          recipients = await sql`SELECT id, phone FROM engineers WHERE id = ANY(${ids}) AND phone IS NOT NULL AND phone <> ''`;
+        } else if (mode === "discipline") {
+          filterLabel = String(b.discipline || "").trim().slice(0, 150);
+          if (!filterLabel) return res.status(400).json({ error: "Choose a discipline." });
+          recipients = await sql`SELECT id, phone FROM engineers WHERE discipline = ${filterLabel} AND phone IS NOT NULL AND phone <> ''`;
+        } else if (mode === "not_voted") {
+          recipients = await sql`
+            SELECT e.id, e.phone FROM engineers e
+            WHERE e.phone IS NOT NULL AND e.phone <> '' AND NOT EXISTS (
+              SELECT 1 FROM campaign_votes v WHERE v.voter_id = e.id AND (
+                (${campaign.electionId}::int IS NOT NULL AND v.election_id = ${campaign.electionId} AND LOWER(v.position) = LOWER(${campaign.position}))
+                OR (${campaign.electionId}::int IS NULL AND v.campaign_id = ${campaignId})
+              )
+            )
+          `;
+        } else {
+          recipients = await sql`SELECT id, phone FROM engineers WHERE phone IS NOT NULL AND phone <> ''`;
+        }
+        if (!recipients.length) return res.status(400).json({ error: "No one matches that selection (or none of them has a phone number on file)." });
+
+        let scheduledFor = parseInstant(b.scheduledFor);
+        if (scheduledFor === undefined) return res.status(400).json({ error: "Invalid schedule time." });
+        const immediate = !scheduledFor || scheduledFor.getTime() - Date.now() < 60 * 1000;
+        if (immediate) scheduledFor = new Date();
+        if (scheduledFor.getTime() - Date.now() > 30 * 86400000) return res.status(400).json({ error: "Schedule at most 30 days ahead." });
+
+        const [batch] = await sql`
+          INSERT INTO campaign_sms_batches (campaign_id, sender_id, message, recipient_mode, recipient_filter, recipients_count, status, scheduled_for)
+          VALUES (${campaignId}, ${session.id}, ${message}, ${mode}, ${filterLabel}, ${recipients.length}, ${immediate ? "sending" : "scheduled"}, ${scheduledFor})
+          RETURNING *
+        `;
+        const ids = recipients.map((r) => r.id);
+        await sql`
+          INSERT INTO campaign_sms_recipients (batch_id, engineer_id, phone)
+          SELECT ${batch.id}, e.id, e.phone FROM engineers e WHERE e.id = ANY(${ids})
+        `;
+        return res.status(201).json({
+          batch: { id: batch.id, status: batch.status, recipientsCount: batch.recipients_count, scheduledFor: batch.scheduled_for, message: batch.message, immediate },
+        });
+      }
+
+      if (req.method === "DELETE") {
+        const id = Number(req.query.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid batch." });
+        const [batch] = await sql`SELECT id, sender_id, status FROM campaign_sms_batches WHERE id = ${id}`;
+        if (!batch) return res.status(404).json({ error: "Not found." });
+        if (batch.sender_id !== session.id) return res.status(403).json({ error: "Not yours to cancel." });
+        if (batch.status !== "scheduled") return res.status(409).json({ error: "Only a scheduled send can be cancelled." });
+        await sql`UPDATE campaign_sms_batches SET status = 'cancelled', completed_at = NOW() WHERE id = ${id}`;
+        return res.status(200).json({ success: true });
+      }
+
+      res.setHeader("Allow", "GET, POST, DELETE, OPTIONS");
+      return res.status(405).json({ error: "Method not allowed." });
+    }
+
+    if (action === "campaign-sms-batch") {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const id = Number(req.query.id);
+      if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid batch." });
+      const [batch] = await sql`
+        SELECT b.*, c.election_id, c.position FROM campaign_sms_batches b JOIN campaigns c ON c.id = b.campaign_id WHERE b.id = ${id}
+      `;
+      if (!batch) return res.status(404).json({ error: "Not found." });
+      if (batch.sender_id !== session.id) return res.status(403).json({ error: "Not yours to view." });
+      const rows = await sql`
+        SELECT r.id, r.status, r.provider_status, r.error, r.sent_at,
+               COALESCE(NULLIF(e.display_name, ''), e.name) AS name,
+               EXISTS(
+                 SELECT 1 FROM campaign_votes v
+                 WHERE v.voter_id = e.id AND (
+                   (${batch.election_id}::int IS NOT NULL AND v.election_id = ${batch.election_id} AND LOWER(v.position) = LOWER(${batch.position}))
+                   OR (${batch.election_id}::int IS NULL AND v.campaign_id = ${batch.campaign_id})
+                 )
+               ) AS has_voted
+        FROM campaign_sms_recipients r JOIN engineers e ON e.id = r.engineer_id
+        WHERE r.batch_id = ${id}
+        ORDER BY name
+      `;
+      return res.status(200).json({
+        batch: {
+          id: batch.id, message: batch.message, recipientMode: batch.recipient_mode, recipientFilter: batch.recipient_filter,
+          recipientsCount: batch.recipients_count, status: batch.status, scheduledFor: batch.scheduled_for,
+          startedAt: batch.started_at, completedAt: batch.completed_at, createdAt: batch.created_at,
+        },
+        recipients: rows.map((r) => ({ id: r.id, name: r.name, status: r.status, providerStatus: r.provider_status, error: r.error, sentAt: r.sent_at, hasVoted: !!r.has_voted })),
+      });
+    }
+
+    // The dispatcher. There's no always-on worker in this deployment
+    // (Vercel Hobby crons are once-a-day, useless for "send at 9:00"), so
+    // sending is driven by whoever's browser is open: the candidate's
+    // own page loops on this right after an immediate send (that's what
+    // powers their progress bar), and the Voting/results pages poke it
+    // in the background so a scheduled batch still goes out on time.
+    // Every call claims at most one small chunk of one batch; concurrent
+    // callers get disjoint chunks (FOR UPDATE SKIP LOCKED inside a single
+    // statement), so two open browsers never double-send a recipient.
+    if (action === "campaign-sms-dispatch") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+
+      // A recipient stuck in 'sending' means a dispatcher died between
+      // claiming it and recording the result. Mark it failed rather than
+      // re-queue it — a duplicate SMS to a real voter is worse than one
+      // marked failed that the candidate can see and resend.
+      await sql`
+        UPDATE campaign_sms_recipients SET status = 'failed', error = 'Sender timed out — not confirmed'
+        WHERE status = 'sending' AND claimed_at < NOW() - INTERVAL '5 minutes'
+      `;
+      const [batch] = await sql`
+        UPDATE campaign_sms_batches
+        SET status = 'sending', started_at = COALESCE(started_at, NOW())
+        WHERE id = (
+          SELECT id FROM campaign_sms_batches
+          WHERE status = 'sending' OR (status = 'scheduled' AND scheduled_for <= NOW())
+          ORDER BY scheduled_for ASC, id ASC
+          LIMIT 1
+        )
+        RETURNING *
+      `;
+      if (!batch) return res.status(200).json({ batchId: null, processed: 0, remaining: 0 });
+
+      const claimed = await sql`
+        UPDATE campaign_sms_recipients r
+        SET status = 'sending', claimed_at = NOW()
+        WHERE r.id IN (
+          SELECT id FROM campaign_sms_recipients
+          WHERE batch_id = ${batch.id} AND status = 'pending'
+          ORDER BY id
+          LIMIT ${SMS_DISPATCH_CHUNK}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING r.id, r.engineer_id, r.phone
+      `;
+
+      if (claimed.length) {
+        const ids = claimed.map((r) => r.engineer_id);
+        const people = await sql`SELECT id, COALESCE(NULLIF(display_name, ''), name) AS name FROM engineers WHERE id = ANY(${ids})`;
+        const nameById = new Map(people.map((p) => [p.id, p.name]));
+        const configured = smsIsConfigured();
+        let i = 0;
+        async function worker() {
+          while (i < claimed.length) {
+            const r = claimed[i++];
+            const msisdn = toSozuriMsisdn(r.phone);
+            if (!msisdn) {
+              await sql`UPDATE campaign_sms_recipients SET status = 'invalid_phone', error = 'No usable phone number' WHERE id = ${r.id}`;
+              continue;
+            }
+            if (!configured) {
+              await sql`UPDATE campaign_sms_recipients SET status = 'failed', error = 'SMS not configured on server' WHERE id = ${r.id}`;
+              continue;
+            }
+            const text = batch.message.replace(/\[Name\]/gi, nameById.get(r.engineer_id) || "Engineer");
+            try {
+              const result = await sendViaSozuri(msisdn, text);
+              const rec = result?.recipients?.[0];
+              await sql`
+                UPDATE campaign_sms_recipients
+                SET status = 'sent', phone = ${msisdn}, provider_status = ${rec?.status || "accepted"}, provider_message_id = ${rec?.messageId || null}, sent_at = NOW()
+                WHERE id = ${r.id}
+              `;
+            } catch (err) {
+              await sql`UPDATE campaign_sms_recipients SET status = 'failed', phone = ${msisdn}, error = ${String(err.message || err).slice(0, 200)} WHERE id = ${r.id}`;
+            }
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(SMS_DISPATCH_CONCURRENCY, claimed.length) }, worker));
+      }
+
+      const [counts] = await sql`
+        SELECT COUNT(*) FILTER (WHERE status IN ('pending', 'sending'))::int AS open,
+               COUNT(*) FILTER (WHERE status = 'sent')::int AS sent,
+               COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+               COUNT(*) FILTER (WHERE status = 'invalid_phone')::int AS invalid
+        FROM campaign_sms_recipients WHERE batch_id = ${batch.id}
+      `;
+      await sql`
+        UPDATE campaign_sms_batches
+        SET sent_count = ${counts.sent}, failed_count = ${counts.failed}, invalid_count = ${counts.invalid},
+            status = ${counts.open === 0 ? "done" : "sending"},
+            completed_at = ${counts.open === 0 ? new Date() : null}
+        WHERE id = ${batch.id}
+      `;
+      return res.status(200).json({
+        batchId: batch.id,
+        campaignId: batch.campaign_id,
+        processed: claimed.length,
+        remaining: counts.open,
+        sent: counts.sent,
+        failed: counts.failed,
+        invalid: counts.invalid,
+        total: batch.recipients_count,
+        done: counts.open === 0,
+      });
+    }
+
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, save-email, support, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import, admin-email-recipients, admin-send-email, admin-send-event-email, admin-email-logs, admin-email-templates, admin-support, admin-support-reply.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, save-email, support, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import, admin-email-recipients, admin-send-email, admin-send-event-email, admin-email-logs, admin-email-templates, admin-support, admin-support-reply, elections, campaigns, upload-campaign-photo, ballot, vote, election-results, campaign-sms-recipients, campaign-sms, campaign-sms-batch, campaign-sms-dispatch.",
     });
   } catch (err) {
     return sendError(res, err);

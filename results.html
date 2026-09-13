@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="/theme-init.js"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<link rel="icon" href="/favicon.ico" sizes="48x48" />
+<link rel="icon" href="/images/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/images/icon-180.png" />
+<link rel="manifest" href="/site.webmanifest" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>Live Results — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="elections.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="voting"></div>
+
+<section class="hub-banner">
+  <img src="images/landing/optimized/pexels-e-g-439660199-29155807.jpg" alt="" />
+  <div class="hub-banner-inner">
+    <span class="eh-eyebrow">Institution of Engineers of Kenya</span>
+    <h1>Live Results</h1>
+    <p>Vote counts update automatically as ballots come in.</p>
+  </div>
+</section>
+
+<main class="vt-page">
+  <a href="/elections.html" class="vt-back">&larr; Back to Voting</a>
+  <div class="vt-toolbar">
+    <select id="rs-select" aria-label="Choose contest"></select>
+    <span class="spacer"></span>
+    <span class="vt-refresh"><span class="vt-live-dot"></span> <span id="rs-updated">Live</span></span>
+    <button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm" id="rs-export">Export CSV</button>
+  </div>
+
+  <div id="rs-loading" class="hub-loading">Loading results…</div>
+  <div id="rs-content" hidden>
+    <div id="rs-winner"></div>
+    <div id="rs-head" class="vt-section-head"></div>
+    <div class="vt-stat-row">
+      <div class="hub-card vt-stat"><span class="num" id="rs-total-votes">0</span><span class="label">Total votes</span></div>
+      <div class="hub-card vt-stat"><span class="num" id="rs-voters">0</span><span class="label">Engineers voted</span></div>
+      <div class="hub-card vt-stat"><span class="num" id="rs-turnout">0%</span><span class="label">Turnout</span></div>
+      <div class="hub-card vt-stat"><span class="num" id="rs-registered">0</span><span class="label">Registered engineers</span></div>
+    </div>
+    <div class="vt-turnout-track" style="background:var(--surface-sunken);margin:-6px 0 22px;"><div class="vt-turnout-fill" id="rs-turnout-bar" style="width:0%"></div></div>
+    <div id="rs-boards"></div>
+  </div>
+</main>
+
+<div id="app-footer"></div>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="app-footer.js"></script>
+<script src="election-shared.js"></script>
+<script src="results.js"></script>
+</body>
+</html>

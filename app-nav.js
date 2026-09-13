@@ -4,8 +4,8 @@
 //
 // Directory and Feed are intentionally not top-level nav items — they're
 // reachable from My Network and Home respectively, keeping the primary
-// nav at exactly the 5 sections: Home, My Network, Jobs, Messages, Me.
-// On phones those 5 also render as a fixed bottom tab bar (the pattern
+// nav to the 6 sections: Home, My Network, Jobs, Voting, Messages, Me.
+// On phones those 6 also render as a fixed bottom tab bar (the pattern
 // from the LinkedIn mobile app) instead of being buried in a hamburger
 // drawer — the drawer now only holds Settings/Logout.
 (function () {
@@ -19,6 +19,7 @@
     home: '<path d="M4 11l8-7 8 7M6 10v9h12v-9" />',
     network: '<circle cx="8" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3 20a5 5 0 0110 0M13 20a4.5 4.5 0 018 0" />',
     jobs: '<rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M3 12h18" />',
+    voting: '<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 12l2 2 4-4" />',
     messages: '<path d="M4 5h16v11H8l-4 4V5z" />',
     me: '<circle cx="12" cy="8" r="4" /><path d="M4 20a8 8 0 0116 0" />',
   };
@@ -27,6 +28,7 @@
     { key: "home", href: "/dashboard.html", label: "Home" },
     { key: "network", href: "/connections.html", label: "My Network", badgeId: "nav-net-badge" },
     { key: "jobs", href: "/jobs.html", label: "Jobs" },
+    { key: "voting", href: "/elections.html", label: "Voting" },
     { key: "messages", href: "/messages.html", label: "Messages", badgeId: "nav-msg-badge" },
     { key: "me", href: "/profile.html", label: "Me" },
   ];
@@ -223,6 +225,9 @@
   // is only fetched when the panel is opened, not on every poll tick.
   function notifUrl(n) {
     if (n.targetType === "event") return "/calendar.html#event-" + n.targetId;
+    if (n.type === "election_results") return "/results.html?election=" + n.targetId;
+    if (n.targetType === "election") return "/elections.html?election=" + n.targetId;
+    if (n.targetType === "campaign") return "/campaign.html?id=" + n.targetId;
     if (n.targetType === "post") return "/profile.html#post-" + n.targetId;
     if (n.type === "connection_request") return "/connections.html";
     if (n.targetType === "profile") return "/profile.html?id=" + n.actorId;
@@ -230,6 +235,10 @@
     return "#";
   }
 
+  var VOTE_NOTIF_ICON =
+    '<span class="hub-avatar sz-sm nav-notif-icon" aria-hidden="true">' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 12l2 2 4-4" /></svg></span>';
   var CALENDAR_NOTIF_ICON =
     '<span class="hub-avatar sz-sm nav-notif-icon" aria-hidden="true">' +
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
@@ -268,7 +277,7 @@
           .map(function (n) {
             return (
               '<a href="' + notifUrl(n) + '" class="nav-notif-item' + (n.isRead ? "" : " is-unread") + '" data-type="' + n.type + '" data-target-type="' + n.targetType + '" data-target-id="' + n.targetId + '">' +
-              (n.type === "event" ? CALENDAR_NOTIF_ICON : H.avatarHtml({ displayName: "", profilePhoto: n.actorPhoto }, "sm")) +
+              (n.type === "event" ? CALENDAR_NOTIF_ICON : n.targetType === "election" || n.targetType === "campaign" ? VOTE_NOTIF_ICON : H.avatarHtml({ displayName: "", profilePhoto: n.actorPhoto }, "sm")) +
               '<span class="body"><span class="text">' + H.escapeHtml(n.text) + "</span><time>" + H.timeAgo(n.createdAt) + "</time></span>" +
               (n.isRead ? "" : '<span class="dot"></span>') +
               "</a>"

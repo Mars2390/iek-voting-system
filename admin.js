@@ -279,6 +279,187 @@
     eventImageLabel.textContent = pendingEventImage ? pendingEventImage.name : "Add event image (optional)…";
   });
 
+  // ---------- Elections ----------
+  var electionForm = document.getElementById("ad-election-form");
+  var electionListEl = document.getElementById("ad-election-list");
+  var electionErrorEl = document.getElementById("ad-election-error");
+  var electionSubmitBtn = document.getElementById("ad-election-submit");
+  var electionCancelBtn = document.getElementById("ad-election-cancel");
+  var allElections = [];
+  var expandedElections = {};
+
+  function fmtInstant(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) + ", " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  }
+  function toLocalInput(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  function phaseTag(phase) {
+    var text = { live: "Voting open", upcoming: "Upcoming", closed: "Closed" }[phase] || phase;
+    return '<span class="ad-phase is-' + phase + '">' + escapeHtml(text) + "</span>";
+  }
+  function windowText(e) {
+    if (e.phase === "closed") return "Closed " + fmtInstant(e.closedAt || e.closesAt);
+    if (e.phase === "upcoming") return e.opensAt ? "Opens " + fmtInstant(e.opensAt) : "Not scheduled — open it manually";
+    return e.closesAt ? "Open until " + fmtInstant(e.closesAt) : "Open until you close it";
+  }
+
+  function resetElectionForm() {
+    electionForm.reset();
+    document.getElementById("ad-election-id").value = "";
+    document.getElementById("ad-election-nominations").checked = true;
+    electionSubmitBtn.textContent = "Create election";
+    electionCancelBtn.hidden = true;
+    electionErrorEl.hidden = true;
+  }
+  electionCancelBtn.addEventListener("click", resetElectionForm);
+
+  electionForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    electionErrorEl.hidden = true;
+    var id = Number(document.getElementById("ad-election-id").value);
+    var opens = document.getElementById("ad-election-opens").value;
+    var closes = document.getElementById("ad-election-closes").value;
+    var body = {
+      title: document.getElementById("ad-election-title").value.trim(),
+      description: document.getElementById("ad-election-description").value.trim(),
+      positions: document.getElementById("ad-election-positions").value,
+      opensAt: opens ? new Date(opens).toISOString() : "",
+      closesAt: closes ? new Date(closes).toISOString() : "",
+      nominationsOpen: document.getElementById("ad-election-nominations").checked,
+      autoVerify: document.getElementById("ad-election-autoverify").checked,
+    };
+    if (id) { body.id = id; body.op = "update"; }
+    electionSubmitBtn.disabled = true;
+    adminApi("elections", { method: id ? "PUT" : "POST", body: body })
+      .then(function () {
+        toast(id ? "Election updated" : "Election created — every member has been notified");
+        resetElectionForm();
+        loadElections();
+      })
+      .catch(function (err) { electionErrorEl.textContent = err.message; electionErrorEl.hidden = false; })
+      .finally(function () { electionSubmitBtn.disabled = false; });
+  });
+
+  function electionOp(id, op, confirmOpts) {
+    var run = function () {
+      adminApi("elections", { method: "PUT", body: { id: id, op: op } })
+        .then(function () { toast({ open: "Voting is open — members notified", close: "Voting closed", reopen: "Voting reopened", announce: "Winners announced — members notified", unannounce: "Announcement withdrawn" }[op] || "Done"); loadElections(); })
+        .catch(function (err) { toast(err.message, true); });
+    };
+    if (confirmOpts) window.Hub.confirm(confirmOpts).then(function (ok) { if (ok) run(); });
+    else run();
+  }
+
+  function candidateRows(electionId) {
+    return adminApi("campaigns", { query: { electionId: electionId, includeEnded: "1" } }).then(function (d) {
+      if (!d.campaigns.length) return '<div class="hub-empty" style="padding:14px;">No candidates yet.</div>';
+      return d.campaigns.map(function (c) {
+        return '<div class="ad-cand-row"><div class="who"><strong>' + escapeHtml(c.candidateName) + "</strong><span>" + escapeHtml(c.position) + " · " + escapeHtml(c.name) + "</span></div>" +
+          (c.verified ? '<span class="ad-verified">Verified</span>' : '<span class="ad-unverified">Pending</span>') +
+          '<span class="votes">' + c.votes + " vote" + (c.votes === 1 ? "" : "s") + "</span>" +
+          '<a class="ad-edit-btn" href="/campaign.html?id=' + c.id + '" target="_blank" rel="noopener">View</a>' +
+          '<button type="button" class="ad-edit-btn" data-verify="' + c.id + '" data-to="' + (c.verified ? "0" : "1") + '">' + (c.verified ? "Unverify" : "Verify") + "</button>" +
+          "</div>";
+      }).join("");
+    });
+  }
+
+  function loadElections() {
+    adminApi("elections").then(function (d) {
+      allElections = d.elections;
+      if (!d.elections.length) { electionListEl.innerHTML = '<div class="hub-empty">No elections yet. Create the first one above.</div>'; return; }
+      electionListEl.innerHTML = d.elections.map(function (e) {
+        var turnout = d.totalEngineers ? Math.round((e.voterCount / d.totalEngineers) * 1000) / 10 : 0;
+        return '<div class="ad-election" data-election="' + e.id + '">' +
+          '<div class="ad-election-head"><h3>' + escapeHtml(e.title) + "</h3>" + phaseTag(e.phase) + (e.winnersAnnouncedAt ? '<span class="ad-verified">Results announced</span>' : "") + "</div>" +
+          '<div class="ad-election-meta">' + escapeHtml(windowText(e)) + " · Positions: " + escapeHtml(e.positions.join(", ")) + (e.nominationsOpen ? " · Nominations open" : " · Nominations closed") + (e.autoVerify ? " · Auto-verify on" : "") + "</div>" +
+          '<div class="ad-election-stats"><span>' + e.candidateCount + " candidate" + (e.candidateCount === 1 ? "" : "s") + "</span>" +
+          (e.pendingCount ? '<span class="pending">' + e.pendingCount + " awaiting verification</span>" : "") +
+          "<span>" + e.voteCount + " vote" + (e.voteCount === 1 ? "" : "s") + "</span><span>" + e.voterCount + " voters (" + turnout + "% turnout)</span></div>" +
+          '<div class="ad-election-actions">' +
+          (e.phase !== "live" && !e.winnersAnnouncedAt ? '<button type="button" class="eh-btn eh-btn-primary hub-btn-sm" data-op="open">' + (e.phase === "closed" ? "Reopen voting" : "Open voting now") + "</button>" : "") +
+          (e.phase === "live" ? '<button type="button" class="eh-btn eh-btn-danger hub-btn-sm" data-op="close">Close voting</button>' : "") +
+          (e.phase === "closed" && !e.winnersAnnouncedAt ? '<button type="button" class="eh-btn eh-btn-primary hub-btn-sm" data-op="announce">Announce winners</button>' : "") +
+          (e.phase === "live" && !e.winnersAnnouncedAt ? '<button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm" data-op="announce">Close &amp; announce winners</button>' : "") +
+          (e.winnersAnnouncedAt ? '<button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm" data-op="unannounce">Withdraw announcement</button>' : "") +
+          '<a class="eh-btn eh-btn-ghost-light hub-btn-sm" href="/results.html?election=' + e.id + '" target="_blank" rel="noopener">Live results</a>' +
+          '<button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm" data-toggle-cands="' + e.id + '">' + (expandedElections[e.id] ? "Hide" : "Candidates") + " (" + e.candidateCount + ")</button>" +
+          '<button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm" data-edit-election="' + e.id + '">Edit</button>' +
+          (e.voteCount === 0 ? '<button type="button" class="eh-btn eh-btn-ghost-light hub-btn-sm" data-delete-election="' + e.id + '" style="color:var(--red-600);">Delete</button>' : "") +
+          "</div>" +
+          '<div class="ad-cands" data-cands="' + e.id + '"' + (expandedElections[e.id] ? "" : " hidden") + "></div>" +
+          "</div>";
+      }).join("");
+
+      electionListEl.querySelectorAll(".ad-election").forEach(function (card) {
+        var id = Number(card.dataset.election);
+        var e = allElections.find(function (x) { return x.id === id; });
+        card.querySelectorAll("[data-op]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var op = btn.dataset.op;
+            if (op === "open" && e.phase === "closed") op = "reopen";
+            var confirms = {
+              open: { title: "Open voting now?", message: "Every member will be notified that voting is open.", confirmText: "Open voting", danger: false },
+              close: { title: "Close voting?", message: "No more ballots will be accepted. You can reopen it if needed.", confirmText: "Close voting" },
+              reopen: { title: "Reopen voting?", message: "Ballots will be accepted again.", confirmText: "Reopen", danger: false },
+              announce: { title: "Announce the winners?", message: "Voting closes (if still open), the leading candidate in each position is marked the winner, and every member is notified.", confirmText: "Announce", danger: false },
+              unannounce: { title: "Withdraw the announcement?", message: "The winner badges come off the results page.", confirmText: "Withdraw" },
+            };
+            electionOp(id, op, confirms[op]);
+          });
+        });
+        var toggle = card.querySelector("[data-toggle-cands]");
+        var candsEl = card.querySelector("[data-cands]");
+        function renderCands() {
+          candsEl.innerHTML = '<div class="hub-loading" style="padding:14px;">Loading…</div>';
+          candidateRows(id).then(function (html) {
+            candsEl.innerHTML = html;
+            candsEl.querySelectorAll("[data-verify]").forEach(function (b) {
+              b.addEventListener("click", function () {
+                adminApi("campaigns", { method: "PUT", body: { id: Number(b.dataset.verify), verified: b.dataset.to === "1" } })
+                  .then(function () { toast(b.dataset.to === "1" ? "Candidate verified — they've been notified" : "Verification removed"); loadElections(); })
+                  .catch(function (err) { toast(err.message, true); });
+              });
+            });
+          }).catch(function (err) { candsEl.innerHTML = '<div class="hub-empty">' + escapeHtml(err.message) + "</div>"; });
+        }
+        toggle.addEventListener("click", function () {
+          expandedElections[id] = !expandedElections[id];
+          candsEl.hidden = !expandedElections[id];
+          toggle.textContent = (expandedElections[id] ? "Hide" : "Candidates") + " (" + e.candidateCount + ")";
+          if (expandedElections[id]) renderCands();
+        });
+        if (expandedElections[id]) renderCands();
+        card.querySelector("[data-edit-election]").addEventListener("click", function () {
+          document.getElementById("ad-election-id").value = e.id;
+          document.getElementById("ad-election-title").value = e.title;
+          document.getElementById("ad-election-description").value = e.description || "";
+          document.getElementById("ad-election-positions").value = e.positions.join("\n");
+          document.getElementById("ad-election-opens").value = toLocalInput(e.opensAt);
+          document.getElementById("ad-election-closes").value = toLocalInput(e.closesAt);
+          document.getElementById("ad-election-nominations").checked = e.nominationsOpen;
+          document.getElementById("ad-election-autoverify").checked = e.autoVerify;
+          electionSubmitBtn.textContent = "Save changes";
+          electionCancelBtn.hidden = false;
+          electionForm.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        var del = card.querySelector("[data-delete-election]");
+        if (del) del.addEventListener("click", function () {
+          window.Hub.confirm({ title: "Delete this election?", message: "Its candidates' campaigns are removed too. Only possible while no votes have been cast." }).then(function (ok) {
+            if (!ok) return;
+            adminApi("elections", { method: "DELETE", query: { id: id } }).then(function () { toast("Election deleted"); loadElections(); }).catch(function (err) { toast(err.message, true); });
+          });
+        });
+      });
+    }).catch(function (err) { electionListEl.innerHTML = '<div class="hub-empty">' + escapeHtml(err.message) + "</div>"; });
+  }
+
   var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   // eventAt is a plain wall-clock string with no timezone marker — see
   // the matching comment in api/auth.js and calendar.js. Never new Date().
@@ -805,6 +986,7 @@
   loadStats();
   loadEngineers(true);
   loadEvents();
+  loadElections();
   loadRecipients();
   loadTemplates();
   loadSupport();

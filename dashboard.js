@@ -116,4 +116,32 @@
       card.hidden = false;
     })
     .catch(function () {});
+
+  // Voting card: the live (or next) official election, else any open
+  // independent campaigns — hidden entirely when there's nothing to vote on.
+  H.api("elections")
+    .then(function (data) {
+      var V = window.HubVote;
+      var card = document.getElementById("db-vote-card");
+      if (!V || !card) return;
+      V.syncClock(data.serverTime);
+      var e = data.elections.find(function (x) { return x.phase === "live"; }) || data.elections.find(function (x) { return x.phase === "upcoming"; });
+      if (e) {
+        var turnout = data.totalEngineers ? Math.round((e.voterCount / data.totalEngineers) * 100) : 0;
+        card.innerHTML =
+          V.phasePill(e.phase) +
+          "<h3>" + H.escapeHtml(e.title) + "</h3>" +
+          "<p>" + H.escapeHtml(V.windowLine(e)) + (e.phase === "live" ? " · " + e.voterCount + " voted (" + turnout + "% turnout)" : " · " + e.candidateCount + " candidate" + (e.candidateCount === 1 ? "" : "s")) + "</p>" +
+          '<a class="eh-btn eh-btn-primary hub-btn-sm" href="/elections.html?election=' + e.id + '">' + (e.phase === "live" ? "Vote now" : "See the candidates") + "</a>";
+        card.hidden = false;
+      } else if (data.independent.liveCount > 0) {
+        card.innerHTML =
+          V.phasePill("live") +
+          "<h3>" + data.independent.liveCount + " campaign" + (data.independent.liveCount === 1 ? "" : "s") + " open for votes</h3>" +
+          "<p>Engineers are running independent campaigns — read their manifestos and cast your vote.</p>" +
+          '<a class="eh-btn eh-btn-primary hub-btn-sm" href="/elections.html">Go to Voting</a>';
+        card.hidden = false;
+      }
+    })
+    .catch(function () {});
 })();

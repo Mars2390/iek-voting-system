@@ -17,13 +17,22 @@
     try { return localStorage.getItem(key); } catch (e) { return null; }
   }
 
-  // Already logged in? Skip straight to the dashboard.
+  // Where to go after login: the page that sent us here (a shared
+  // campaign link, say), if it's a same-site path; otherwise the
+  // dashboard. Only a bare "/path?query" is honoured — anything with a
+  // scheme or a "//" prefix is dropped so this can't become an open redirect.
+  function nextUrl() {
+    var next = new URLSearchParams(window.location.search).get("next") || "";
+    return /^\/(?!\/)[^\s]*$/.test(next) ? next : "/dashboard.html";
+  }
+
+  // Already logged in? Skip straight to where they were going.
   var existingToken = safeStorageGet(STORAGE_KEY);
   if (existingToken) {
     fetch("/api/auth?action=me", {
       headers: { Authorization: "Bearer " + existingToken },
     })
-      .then(function (r) { return r.ok ? window.location.replace("/dashboard.html") : null; })
+      .then(function (r) { return r.ok ? window.location.replace(nextUrl()) : null; })
       .catch(function () {});
   }
 
@@ -191,7 +200,7 @@
           showError("Your browser is blocking this site from staying signed in — common in the WhatsApp/Facebook in-app browser or Private Browsing. Open this link in Safari or Chrome directly instead.");
           return;
         }
-        window.location.href = "/dashboard.html";
+        window.location.href = nextUrl();
       })
       .catch(function () {
         setLoading(false);

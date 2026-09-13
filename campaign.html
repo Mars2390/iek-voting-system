@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="/theme-init.js"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<link rel="icon" href="/favicon.ico" sizes="48x48" />
+<link rel="icon" href="/images/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/images/icon-180.png" />
+<link rel="manifest" href="/site.webmanifest" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>Campaign — Engineer Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="engineer-hub.css" />
+<link rel="stylesheet" href="dashboard.css" />
+<link rel="stylesheet" href="hub.css" />
+<link rel="stylesheet" href="profile.css" />
+<link rel="stylesheet" href="elections.css" />
+</head>
+<body>
+
+<div id="app-nav" data-active="voting"></div>
+
+<main class="vt-page">
+  <a href="/elections.html" class="vt-back">&larr; Back to Voting</a>
+  <div id="cp-loading" class="hub-loading">Loading campaign…</div>
+
+  <div id="cp-content" hidden>
+    <section id="cp-hero" class="hub-card vt-hero"></section>
+    <section id="cp-manifesto" class="hub-card vt-manifesto"></section>
+
+    <section id="cp-owner" class="hub-card vt-owner-card" hidden>
+      <h2>Manage your campaign</h2>
+      <div class="hub-tabs">
+        <button class="hub-tab is-active" data-otab="overview">Overview</button>
+        <button class="hub-tab" data-otab="sms">SMS outreach</button>
+        <button class="hub-tab" data-otab="tracking">Tracking</button>
+      </div>
+
+      <div id="cp-owner-overview">
+        <p id="cp-owner-note" class="vt-owner-note"></p>
+        <div class="vt-owner-actions">
+          <button type="button" class="eh-btn eh-btn-primary" id="cp-edit-btn">Edit campaign</button>
+          <button type="button" class="eh-btn eh-btn-ghost-light" id="cp-sms-jump-btn">Send SMS to voters</button>
+          <button type="button" class="eh-btn eh-btn-ghost-light" id="cp-delete-btn">Delete campaign</button>
+          <button type="button" class="eh-btn eh-btn-ghost-light" id="cp-withdraw-btn" hidden>Withdraw campaign</button>
+        </div>
+      </div>
+
+      <div id="cp-owner-sms" hidden>
+        <div id="cp-sms-blocked" class="vt-owner-note is-warn" hidden></div>
+        <form id="cp-sms-form" class="vt-sms">
+          <div class="lg-field">
+            <span>Who should receive it?</span>
+            <div class="vt-recip-modes">
+              <label class="vt-recip-mode"><input type="radio" name="cp-mode" value="all" checked /><span>All engineers<small><span id="cp-count-all">…</span> with a phone number on file</small></span></label>
+              <label class="vt-recip-mode"><input type="radio" name="cp-mode" value="not_voted" /><span>Engineers who haven't voted yet<small><span id="cp-count-notvoted">…</span> still to vote — the ones to remind</small></span></label>
+              <label class="vt-recip-mode"><input type="radio" name="cp-mode" value="discipline" /><span>By discipline<small>Only engineers in one discipline</small></span></label>
+              <label class="vt-recip-mode"><input type="radio" name="cp-mode" value="individual" /><span>Choose individually<small>Pick specific engineers from the list</small></span></label>
+            </div>
+          </div>
+          <label class="lg-field" id="cp-discipline-wrap" hidden><span>Discipline</span><select id="cp-discipline"></select></label>
+          <div class="lg-field" id="cp-individual-wrap" hidden>
+            <span>Engineers <small style="font-weight:600;">(<span id="cp-selected-count">0</span> selected)</small></span>
+            <input type="text" id="cp-recip-search" placeholder="Search by name…" style="margin-bottom:8px;" />
+            <div id="cp-recip-list" class="vt-recip-list"></div>
+          </div>
+
+          <label class="lg-field">
+            <span>Your message</span>
+            <textarea id="cp-sms-text" class="pf-form-textarea vt-sms-textarea" maxlength="300" placeholder="Dear [Name], I'm asking for your vote as Honorary Treasurer…"></textarea>
+            <div class="vt-sms-count"><span>Use <strong>[Name]</strong> to insert each engineer's name.</span><span id="cp-sms-counter">0 / 300</span></div>
+          </label>
+          <label class="vt-recip-mode" style="display:flex;"><input type="checkbox" id="cp-sms-signature" checked /><span>Sign with my name and add my campaign link<small>Recipients tap the link to open this page and vote.</small></span></label>
+          <div class="vt-sms-preview"><span class="label">Preview (as one recipient will see it)</span><span id="cp-sms-preview"></span></div>
+
+          <div class="lg-field">
+            <span>When</span>
+            <div class="vt-sms-when">
+              <label><input type="radio" name="cp-when" value="now" checked /> Send now</label>
+              <label><input type="radio" name="cp-when" value="later" /> Schedule for</label>
+              <input type="datetime-local" id="cp-sms-when-at" disabled />
+            </div>
+          </div>
+
+          <div id="cp-sms-error" class="lg-error" hidden></div>
+          <div class="vt-sms-send-row">
+            <button type="submit" class="eh-btn eh-btn-primary" id="cp-sms-send">Send SMS</button>
+            <button type="button" class="eh-btn eh-btn-ghost-light" id="cp-sms-test">Send a test to my phone</button>
+            <span class="vt-sms-quota" id="cp-sms-quota"></span>
+          </div>
+          <div id="cp-sms-progress" class="vt-progress" hidden>
+            <div class="vt-progress-track"><div class="vt-progress-fill" id="cp-sms-progress-fill" style="width:0%"></div></div>
+            <div class="vt-progress-label" id="cp-sms-progress-label"></div>
+          </div>
+        </form>
+
+        <div class="ad-divider" style="height:1px;background:var(--border);margin:22px 0;"></div>
+        <h2 style="font-size:17px;">Sent &amp; scheduled messages</h2>
+        <div id="cp-batches"></div>
+      </div>
+
+      <div id="cp-owner-tracking" hidden>
+        <p class="vt-inline-note">Who received your SMS and who has since voted. Inside an official election, "voted" means they cast a ballot for this position — never which candidate they chose.</p>
+        <div id="cp-tracking"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="app-footer"></div>
+
+<script src="hub-common.js"></script>
+<script src="app-nav.js"></script>
+<script src="app-footer.js"></script>
+<script src="election-shared.js"></script>
+<script src="campaign.js"></script>
+</body>
+</html>

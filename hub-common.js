@@ -31,9 +31,13 @@ window.Hub = (function () {
     return safeStorageGet(STORAGE_KEY);
   }
 
+  // A logged-out visitor is sent to login with the page they wanted as
+  // ?next= — so a shared campaign link (/campaign.html?id=12) lands on
+  // that campaign after login instead of on the dashboard.
   function requireAuth() {
     if (!token()) {
-      window.location.replace("/login.html");
+      var here = window.location.pathname + window.location.search;
+      window.location.replace("/login.html" + (here && here !== "/dashboard.html" ? "?next=" + encodeURIComponent(here) : ""));
       return false;
     }
     return true;

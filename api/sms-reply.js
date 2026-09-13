@@ -79,13 +79,27 @@ export default async function handler(req, res) {
       if (!messageId) return res.status(200).json({ updated: false, error: "No messageId in payload." });
 
       const normalizedStatus = FAILED_DELIVERY_STATUSES.has(status) ? "failed" : "sent";
-      const result = await sql`
-        UPDATE sms_log
-        SET status = ${normalizedStatus}, provider_status = ${status || null}
-        WHERE provider_message_id = ${messageId}
-        RETURNING id
-      `;
-      return res.status(200).json({ updated: result.length > 0, messageId, status });
+      // Two senders share the same Sozuri account: the SMS Draft Center
+      // (sms_log) and Engineer Hub campaign SMS (campaign_sms_recipients,
+      // see api/auth.js `campaign-sms-dispatch`). A messageId belongs to
+      // exactly one of them, so both updates are cheap and only one
+      // matches — either way the delivery outcome lands on the right row.
+      const [result, campaignResult] = await Promise.all([
+        sql`
+          UPDATE sms_log
+          SET status = ${normalizedStatus}, provider_status = ${status || null}
+          WHERE provider_message_id = ${messageId}
+          RETURNING id
+        `,
+        sql`
+          UPDATE campaign_sms_recipients
+          SET status = ${normalizedStatus}, provider_status = ${status || null},
+              error = ${normalizedStatus === "failed" ? "Delivery failed: " + String(status || "unknown") : null}
+          WHERE provider_message_id = ${messageId}
+          RETURNING id
+        `,
+      ]);
+      return res.status(200).json({ updated: result.length > 0 || campaignResult.length > 0, messageId, status });
     }
 
     const { phone: rawPhone, message } = extractPhoneAndMessage(req.body);

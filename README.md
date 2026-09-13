@@ -60,7 +60,15 @@ IEK-VOTING-FULL/
 │   ├── export.js              # GET — CSV/Excel download, ?type=engineers|stats|candidates|calls|remarks
 │   ├── import.js              # POST — bulk-add engineers from CSV text
 │   ├── sms.js                 # GET (log)/POST (send)/?kind=drafts|replies|balance — Sozuri SMS, see "SMS Draft Center" below
-│   └── sms-reply.js           # POST — inbound Sozuri webhook for two-way SMS replies
+│   ├── sms-reply.js           # POST — inbound Sozuri webhook for two-way SMS replies (+ delivery status via ?kind=status)
+│   ├── _sozuri.js             # Shared Sozuri sender + phone normalizer (used by sms.js and the Engineer Hub campaign SMS tool)
+│   └── auth.js                # Engineer Hub member/admin API, one ?action= dispatch — includes the VOTING section (see §7)
+├── elections.html/.js        # Engineer Hub Voting: landing, ballot, campaigns, results preview, my campaigns
+├── campaign.html/.js         # A campaign's page: vote, share, and the candidate's edit / SMS outreach / tracking tools
+├── results.html/.js          # Live results dashboard with CSV export
+├── election-shared.js        # Shared voting UI: candidate card, locked vote flow, campaign form modal
+├── elections.css             # Styles for the three voting pages
+├── migrations/016_elections.sql  # elections, campaigns, campaign_votes, campaign_sms_* tables
 ├── setup.js                  # One-command bootstrap: tables + sync + git push + deploy
 ├── fix-database.js           # Cleanup + clean re-import (see git history for context)
 ├── .env.example             # Template for required env vars (committed)
@@ -273,6 +281,46 @@ Two separate webhooks, both handled by `api/sms-reply.js` (one file, `?kind=` di
 Confirm current per-SMS pricing on your Sozuri dashboard before budgeting — I have no way to fetch live pricing. Messages over 160 characters bill as multiple SMS parts; the character counter in the composer shows this before you send.
 
 ---
+
+## 7. Engineer Hub Voting (member campaigns, official elections, live results)
+
+A second, separate voting system lives inside Engineer Hub (the logged-in member platform), reachable from the **Voting** item in the main nav. It is **not** the turnout tracker described above — that one (`voting.html`, `api/candidates.js`, the `votes`/`candidates` tables) is a check-in desk where an official marks who showed up and clicks +1 on a tally, and it still holds the real Aug-2026 data untouched. This one is a real ballot: every vote is cast by a logged-in engineer (identified by name, membership number, and email through the existing name + PIN login) against a specific campaign, and it can't be changed once cast.
+
+Schema: [`migrations/016_elections.sql`](migrations/016_elections.sql) (`elections`, `campaigns`, `campaign_votes`, `campaign_sms_batches`, `campaign_sms_recipients`). Backend: the `VOTING` section of `api/auth.js` (no new function files — see [Serverless function count](#serverless-function-count-vercel-hobby-plan-limit-12)). Frontend: `elections.html` (landing + ballot), `campaign.html` (campaign page + owner tools), `results.html` (live results), with shared logic in `election-shared.js` and styles in `elections.css`. Admin controls are in the existing hidden admin panel (`admin.html` → **Elections**).
+
+### Two kinds of contest
+
+| | Official election | Independent campaign |
+|---|---|---|
+| Created by | Admin (admin panel → Elections) | Any engineer (Voting → Create my campaign) |
+| Positions | Fixed list set by admin (e.g. President, Honorary Treasurer) | Free text, chosen by the candidate |
+| Voting window | Admin's `opens_at`/`closes_at`, or manual **Open voting now** / **Close voting** | Candidate's own start/end (up to 180 days) |
+| Verification | Candidates must be **verified** by admin before they can receive votes or send SMS (or tick *auto-verify* on the election) | None needed |
+| Vote rule | **One vote per engineer per position** | **One vote per engineer per campaign** |
+| Winners | Admin clicks **Announce winners** → results page shows 🏆 badges, everyone is notified | Live leaderboard only |
+
+Both rules are enforced by unique indexes on `campaign_votes`, not by check-then-insert code, so two simultaneous taps can only ever produce one ballot (`INSERT … ON CONFLICT DO NOTHING`, tested with a deliberate concurrent-vote race). An engineer can run one campaign per position per contest (also a unique index). The election phase (`upcoming` / `live` / `closed`) is computed in SQL from `TIMESTAMPTZ` instants on every read, so the ballot, the results page, the admin list, and vote acceptance can never disagree.
+
+### What a member can do
+
+- **Vote** — `elections.html` shows the ballot per position with large **Vote for …** buttons. Tapping one opens a confirm dialog ("Your vote is final"), then the position locks: your choice shows as *You voted for X*, every other candidate in that position becomes *Vote locked*. The ballot is ordered by verification and entry order, deliberately **not** by vote count, so it never nudges a voter toward whoever's ahead.
+- **Launch a campaign** — name, position (from the election's list, or free text for an independent run), manifesto, photo (uploaded to Vercel Blob; falls back to the profile photo), and end date for an independent campaign. Lands on the campaign page with a shareable link (`/campaign.html?id=N`) plus **Copy link** and **Share on WhatsApp**. A logged-out visitor who opens a shared link is sent to login and returned to that campaign afterwards (`?next=`, same-site paths only).
+- **Edit / delete / withdraw** — the candidate can edit name, manifesto and photo any time; the position is locked once votes exist. **Delete** is only possible with zero votes (as specified); with votes, **Withdraw** takes the campaign off the ballot but keeps the ballots on record.
+- **SMS outreach** (campaign page → *Manage your campaign* → *SMS outreach*) — recipients are **All engineers with a phone**, **Engineers who haven't voted yet** (the GOTV list), **By discipline**, or **Choose individually** (names only — phone numbers are never shown to the candidate). `[Name]` personalises each message. The message is signed with the candidate's name, position and campaign link — the Sozuri sender ID on the wire (`SOZURI_SENDER`) can't change per message, so "sent from the candidate's name" is done in the text. **Send now** or **Schedule for** a date/time; **Send a test to my phone** first. Limits: 300 characters of the candidate's own text, and **3 sends per campaign per 24 hours** (`CAMPAIGN_SMS_DAILY_LIMIT` in `api/auth.js`) — every send draws on the shared Sozuri credit, so raise this deliberately. The account's `promotional` route appends the carrier opt-out suffix as before.
+- **Tracking** — per send: who received it (sent / failed / no usable number, plus Sozuri's delivery status via the existing `/api/sms-status` webhook, which now updates both `sms_log` and `campaign_sms_recipients`) and who has since **voted**. Inside an official election "voted" means *cast a ballot for that position* — turnout, never *who they voted for*; a candidate can't learn how anyone voted.
+- **Live results** — `results.html`: per-position leaderboard with bars and percentages, leader / tie / winner badges, total votes, engineers voted, turnout of all registered engineers, last-vote time. Refreshes every 5 seconds (ballot and campaign pages every 8 seconds; polling pauses in background tabs). **Export CSV** downloads the aggregate results (no voter identities).
+
+### How scheduled SMS actually goes out
+
+There is no always-on worker in this deployment (Vercel Hobby cron runs once a day — useless for "send at 9:00"). Sending is driven by `?action=campaign-sms-dispatch`, which any logged-in page pokes: the candidate's own page loops on it right after an immediate send (that's what powers the progress bar), and the Voting / results / campaign pages call it once on load so a scheduled batch still goes out on time as long as anyone in the hub is around. Each call claims at most 15 recipients of one batch with `FOR UPDATE SKIP LOCKED` inside a single statement, so two open browsers never double-send. A recipient stuck in `sending` for 5 minutes (a dispatcher died mid-flight) is marked failed rather than re-queued — a duplicate SMS to a real voter is worse than one visibly failed row.
+
+### Admin (admin panel → Elections)
+
+Create an election (title, description, positions one per line, optional open/close times, *accept campaigns*, *auto-verify*), then per election: **Open voting now** / **Close voting** / **Reopen**, expand **Candidates** to **Verify** / **Unverify** each one, **Announce winners** (closes voting if still open, marks the leading candidate per position — a tie gets no winner badge — and notifies every member), **Withdraw announcement**, **Edit** (a position with candidates can't be removed), **Delete** (only with zero votes). Members get in-app notifications when an election is created, when voting opens, when results are announced, and when their own candidacy is verified.
+
+### Testing
+
+Same discipline as the rest of Engineer Hub: disposable `TEST.*` engineers against the live Neon database, always deleted afterwards, and the engineer count re-checked. Both suites in the last pass ran green: 85 direct-handler checks (every action, both vote rules, the concurrent-vote race, dispatcher with Sozuri mocked, delivery webhook, admin ops, CSV) and 40 Playwright browser checks (admin creates/verifies/opens/announces through the UI, campaign create/edit, shared link → login → back to the campaign, vote + lock + reload, double-tap firing exactly one request, SMS test send + tracking + schedule + cancel, results + export, mobile layout with no horizontal overflow, Home card, notifications). **No real SMS was sent** — Sozuri was mocked in every test; the first real send should be *Send a test to my phone* from a real campaign.
 
 ## API Reference
 
