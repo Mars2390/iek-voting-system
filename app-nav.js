@@ -134,6 +134,7 @@
       headers: { Authorization: "Bearer " + token },
     }).finally(function () {
       safeStorageRemove(STORAGE_KEY);
+      safeStorageRemove("eh_his_token"); // the Engineers Hub token from the SSO bridge
       window.location.href = "/login.html";
     });
   }

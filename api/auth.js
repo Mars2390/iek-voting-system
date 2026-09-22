@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual, createCipheriv, createDecipheriv } from "node:crypto";
 import { put } from "@vercel/blob";
 import { getSql } from "./_db.js";
 import { applyCors, sendError, logAudit, getClientIp } from "./_utils.js";
@@ -20,7 +20,9 @@ import { sendBulkEmail, sendEventInviteEmail, sendThreadEmail, verifyInboundWebh
 // admin-email-logs, admin-email-templates, admin-support, admin-support-reply,
 // and the Voting system: elections, campaigns, upload-campaign-photo,
 // ballot, vote, election-results, campaign-sms-recipients, campaign-sms,
-// campaign-sms-batch, campaign-sms-dispatch (see the VOTING section).
+// campaign-sms-batch, campaign-sms-dispatch (see the VOTING section),
+// and the SSO bridge to Engineers Hub: sso-login, sso-link, sso-unlink
+// (see the SSO BRIDGE section).
 //
 // A membership number is not a secret — it's a lookup key, not a
 // credential — so login also requires a PIN the member sets on their
@@ -52,6 +54,27 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25MB
 const MAX_VOICE_BYTES = 15 * 1024 * 1024; // 15MB
 const REACTION_TYPES = ["like", "love", "celebrate", "laugh", "wow", "sad", "angry"];
 const TYPING_WINDOW_MS = 8000;
+
+// ---- SSO bridge to Engineers Hub (Bismarck's Laravel 12 + Sanctum) ----
+// See migrations/017_sso.sql and the SSO BRIDGE section below. His API
+// is only ever called from here, server-to-server; the browser reaches
+// it through the same-origin rewrite /api/his-backend/* in vercel.json.
+const SSO_BASE_URL = String(process.env.SSO_BASE_URL || "https://www.engineershub.africa/api/v1").replace(/\/+$/, "");
+// Mirrors his SANCTUM_TOKEN_TTL_MINUTES default. Only /auth/refresh tells
+// us the real TTL; register/login don't, so this is the assumption for those.
+const SSO_TOKEN_TTL_MINUTES = Number(process.env.SSO_TOKEN_TTL_MINUTES || 43200); // 30 days
+// A cached token is handed to the client only with at least this much
+// life left; otherwise it's rotated first. A day gives a member's open
+// tab or app a full session before anything can expire under it.
+const SSO_TOKEN_MIN_REMAINING_MS = 24 * 60 * 60 * 1000;
+// A hanging Laravel host must not sit inside our function for long — the
+// PIN login that every member already has is the fallback, not a wait.
+const SSO_TIMEOUT_MS = 8000;
+const SSO_DEVICE_NAME = "engineer-hub-sso";
+// His /auth/register sends a verification-code SMS to any phone it is
+// given — from HIS platform, in HIS name, to a member who only pressed
+// a button here. Off by default; flip on once that message is expected.
+const SSO_REGISTER_WITH_PHONE = process.env.SSO_REGISTER_WITH_PHONE === "1";
 
 // Admin panel access — intentionally a short allowlist + shared PIN, not
 // tied to the engineers table at all (an admin need not be one of the
@@ -433,6 +456,105 @@ async function notifyAllEngineers(sql, type, targetType, targetId) {
     INSERT INTO notifications (recipient_id, actor_id, type, target_type, target_id)
     SELECT id, NULL, ${type}, ${targetType}, ${targetId} FROM engineers
   `.catch(() => {});
+}
+
+// =========================================================
+// SSO BRIDGE — Engineers Hub (Bismarck's Laravel 12 + Sanctum)
+//
+// A member logs in HERE once (IEK number + PIN) and can then use the
+// Laravel-backed features — marketplace, courses, payments — without a
+// second login. These helpers obtain a Sanctum token on the member's
+// behalf, keep it sealed in sso_identities, rotate it through his
+// POST /auth/refresh before it expires, and hand it to the client, which
+// then calls his API through /api/his-backend/* with it.
+//
+// Two ways an engineer gets an Engineers Hub account:
+//   registered — created for them on first use with a random password
+//                only this backend has seen (sealed at rest). His
+//                register endpoint returns a token immediately, so this
+//                path needs nothing from Bismarck to work.
+//   linked     — they already had one. They sign in to it once via
+//                `sso-link`; the password is forwarded to his
+//                /auth/login and discarded, and only the token is kept.
+//
+// His API is never the authority for OUR session — requireSession()
+// stays the only gate on every action in this file. If his platform is
+// down, the SSO actions answer 503 and nothing else in the app changes.
+// =========================================================
+
+function ssoKey() {
+  const hex = String(process.env.SSO_CRED_KEY || "").trim();
+  return /^[0-9a-fA-F]{64}$/.test(hex) ? Buffer.from(hex, "hex") : null;
+}
+
+// AES-256-GCM, written as "v1.<iv>.<tag>.<ciphertext>" in base64url so a
+// later key or algorithm change can be told apart from older rows.
+function sealSecret(plain) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", ssoKey(), iv);
+  const ct = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
+  return ["v1", iv.toString("base64url"), cipher.getAuthTag().toString("base64url"), ct.toString("base64url")].join(".");
+}
+function openSecret(sealed) {
+  const [v, iv, tag, ct] = String(sealed || "").split(".");
+  if (v !== "v1" || !iv || !tag || !ct) return null;
+  try {
+    const d = createDecipheriv("aes-256-gcm", ssoKey(), Buffer.from(iv, "base64url"));
+    d.setAuthTag(Buffer.from(tag, "base64url"));
+    return Buffer.concat([d.update(Buffer.from(ct, "base64url")), d.final()]).toString("utf8");
+  } catch {
+    return null; // wrong key or tampered row — treated as "no token"
+  }
+}
+
+// One outbound call to his API. Never throws for an HTTP status — callers
+// read { ok, status, data }. A host that can't be reached at all comes
+// back as code "unavailable", and his maintenance-mode 503 as
+// "maintenance", so no action here ever leaks a stack trace about
+// somebody else's server into a member's screen.
+async function hisApi(path, { method = "GET", body, token } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SSO_TIMEOUT_MS);
+  try {
+    const r = await fetch(SSO_BASE_URL + path, {
+      method,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "EngineerHub-SSO/1 (+https://engineer-hubb.vercel.app)",
+        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+    let data = null;
+    try { data = await r.json(); } catch { data = null; }
+    const code = r.status === 503 && data && data.code === "maintenance" ? "maintenance" : null;
+    return { ok: r.ok, status: r.status, data: data || {}, code };
+  } catch (err) {
+    const detail = err && err.name === "AbortError" ? "timeout" : String((err && err.message) || err);
+    return { ok: false, status: 0, data: {}, code: "unavailable", detail };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 503 with a stable code the clients switch on. Retry-After mirrors his.
+function ssoDown(res, r) {
+  const maintenance = r.code === "maintenance";
+  res.setHeader("Retry-After", maintenance ? "300" : "60");
+  return res.status(503).json({
+    code: maintenance ? "sso_maintenance" : "sso_unavailable",
+    error: maintenance
+      ? "Engineers Hub is under scheduled maintenance. Everything else here still works."
+      : "Engineers Hub sign-in is unavailable right now. Everything else here still works.",
+  });
+}
+
+// What every successful SSO action returns. `expiresAt` lets the client
+// ask for a fresh token before this one runs out rather than after.
+function ssoTokenPayload(token, expiresAt, origin, extra = {}) {
+  return { token, expiresAt, origin, linked: true, ...extra };
 }
 
 // Body parsing is off (see the raw-body read at the top of the handler
@@ -3805,8 +3927,248 @@ export default async function handler(req, res) {
       });
     }
 
+    // ================= SSO BRIDGE =================
+    // POST: hand back a valid Engineers Hub token for this member,
+    // obtaining or rotating one as needed. GET: status only, no side
+    // effects (the settings page and the app's "Linked accounts" row).
+    if (action === "sso-login") {
+      if (req.method !== "POST" && req.method !== "GET") {
+        res.setHeader("Allow", "GET, POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      if (!ssoKey()) {
+        return res.status(503).json({ code: "sso_not_configured", error: "Engineers Hub sign-in isn't set up yet." });
+      }
+      const [link] = await sql`
+        SELECT * FROM sso_identities WHERE provider = 'engineershub' AND engineer_id = ${session.id}
+      `;
+
+      if (req.method === "GET") {
+        return res.status(200).json({
+          linked: !!link && link.status === "linked",
+          status: link ? link.status : "none",
+          origin: link ? link.origin : null,
+          email: link ? link.external_email : null,
+          expiresAt: link ? link.token_expires_at : null,
+        });
+      }
+
+      const force = String(req.query.force || "") === "1";
+      const now = Date.now();
+
+      // A link we already know is broken isn't retried on every call —
+      // that would hit his login rate limit on the member's behalf.
+      // ?force=1 (the "Try again" button) is the way back in.
+      if (link && link.status === "broken" && !force) {
+        return res.status(409).json({ code: "sso_relink_required", error: "Your Engineers Hub account needs to be linked again." });
+      }
+
+      // 1. A cached token with a day or more left goes straight back.
+      if (link && link.status === "linked" && link.token_enc && !force) {
+        const remaining = new Date(link.token_expires_at).getTime() - now;
+        const token = remaining > SSO_TOKEN_MIN_REMAINING_MS ? openSecret(link.token_enc) : null;
+        if (token) {
+          await sql`UPDATE sso_identities SET last_used_at = NOW() WHERE id = ${link.id}`;
+          return res.status(200).json(ssoTokenPayload(token, link.token_expires_at, link.origin));
+        }
+      }
+
+      // 2. Rotate the one we hold through his /auth/refresh.
+      if (link && link.token_enc) {
+        const current = openSecret(link.token_enc);
+        const r = current ? await hisApi("/auth/refresh", { method: "POST", token: current }) : null;
+        if (r && r.code) return ssoDown(res, r);
+        if (r && r.ok && r.data.token) {
+          const expiresAt = new Date(now + Number(r.data.expires_in_minutes || SSO_TOKEN_TTL_MINUTES) * 60000);
+          await sql`
+            UPDATE sso_identities
+            SET token_enc = ${sealSecret(r.data.token)}, token_expires_at = ${expiresAt},
+                status = 'linked', last_error = NULL, last_used_at = NOW()
+            WHERE id = ${link.id}
+          `;
+          return res.status(200).json(ssoTokenPayload(r.data.token, expiresAt, link.origin));
+        }
+        // 401 here means revoked or long expired — fall through.
+      }
+
+      // 3. An account we registered: sign in again with the password we hold.
+      if (link && link.credential_enc) {
+        const password = openSecret(link.credential_enc);
+        const r = password
+          ? await hisApi("/auth/login", { method: "POST", body: { email: link.external_email, password, device: SSO_DEVICE_NAME } })
+          : { ok: false, status: 0, data: {}, code: null };
+        if (r.code) return ssoDown(res, r);
+        if (r.status === 429) {
+          return res.status(429).json({ code: "sso_rate_limited", error: "Too many sign-in attempts on Engineers Hub. Try again in a few minutes." });
+        }
+        if (r.ok && r.data.token) {
+          const expiresAt = new Date(now + SSO_TOKEN_TTL_MINUTES * 60000);
+          await sql`
+            UPDATE sso_identities
+            SET token_enc = ${sealSecret(r.data.token)}, token_expires_at = ${expiresAt},
+                external_user_id = COALESCE(${r.data.user && r.data.user.id ? String(r.data.user.id) : null}, external_user_id),
+                status = 'linked', last_error = NULL, last_used_at = NOW()
+            WHERE id = ${link.id}
+          `;
+          return res.status(200).json(ssoTokenPayload(r.data.token, expiresAt, link.origin));
+        }
+        // The password we registered no longer works — it was changed on
+        // his side. The member gets back in by signing in there once.
+        await sql`
+          UPDATE sso_identities SET status = 'broken', token_enc = NULL,
+            last_error = ${`login ${r.status}: ${String(r.data.message || "").slice(0, 200)}`}
+          WHERE id = ${link.id}
+        `;
+        return res.status(409).json({ code: "sso_relink_required", error: "Your Engineers Hub account needs to be linked again." });
+      }
+
+      // A linked account whose token can't be refreshed: same answer.
+      if (link) {
+        await sql`UPDATE sso_identities SET status = 'broken', token_enc = NULL, last_error = 'refresh rejected' WHERE id = ${link.id}`;
+        return res.status(409).json({ code: "sso_relink_required", error: "Your Engineers Hub account needs to be linked again." });
+      }
+
+      // 4. First use: create their Engineers Hub account. This is the
+      //    only path that writes to his platform, and it is one row.
+      const email = String(session.email || "").trim().toLowerCase();
+      if (!email) {
+        return res.status(409).json({ code: "sso_email_required", error: "Add an email address to your profile first — Engineers Hub accounts need one." });
+      }
+      const password = randomBytes(32).toString("base64url"); // 43 chars, well past his 10 minimum
+      const body = {
+        name: String(session.display_name || session.name || "").slice(0, 120),
+        email,
+        password,
+        account_type: "engineer",
+        country_code: "KE",
+        device: SSO_DEVICE_NAME,
+      };
+      if (SSO_REGISTER_WITH_PHONE && session.phone) body.phone = session.phone;
+      const r = await hisApi("/auth/register", { method: "POST", body });
+      if (r.code) return ssoDown(res, r);
+      if (r.status === 201 && r.data.token) {
+        const expiresAt = new Date(now + SSO_TOKEN_TTL_MINUTES * 60000);
+        const hisUser = r.data.user || {};
+        await sql`
+          INSERT INTO sso_identities
+            (engineer_id, provider, external_user_id, external_email, origin, credential_enc, token_enc, token_expires_at, status, last_used_at)
+          VALUES
+            (${session.id}, 'engineershub', ${hisUser.id ? String(hisUser.id) : null}, ${email}, 'registered',
+             ${sealSecret(password)}, ${sealSecret(r.data.token)}, ${expiresAt}, 'linked', NOW())
+          ON CONFLICT (provider, engineer_id) DO UPDATE SET
+            external_user_id = EXCLUDED.external_user_id, external_email = EXCLUDED.external_email,
+            origin = 'registered', credential_enc = EXCLUDED.credential_enc, token_enc = EXCLUDED.token_enc,
+            token_expires_at = EXCLUDED.token_expires_at, status = 'linked', last_error = NULL, last_used_at = NOW()
+        `;
+        return res.status(200).json(ssoTokenPayload(r.data.token, expiresAt, "registered", { created: true }));
+      }
+      if (r.status === 422 && /already registered/i.test(String(r.data.message || ""))) {
+        // Either a concurrent sso-login for this same member just won the
+        // race to register (their row exists now — hand back its token),
+        // or the member signed up on Engineers Hub themselves and needs
+        // to link that account with their own password.
+        const [raced] = await sql`
+          SELECT token_enc, token_expires_at, origin FROM sso_identities
+          WHERE provider = 'engineershub' AND engineer_id = ${session.id} AND status = 'linked'
+        `;
+        const token = raced && raced.token_enc ? openSecret(raced.token_enc) : null;
+        if (token) return res.status(200).json(ssoTokenPayload(token, raced.token_expires_at, raced.origin));
+        return res.status(409).json({
+          code: "sso_account_exists",
+          email,
+          error: "You already have an Engineers Hub account with this email. Sign in to it once to link it.",
+        });
+      }
+      return res.status(502).json({
+        code: "sso_rejected",
+        error: "Engineers Hub didn't accept the sign-in.",
+        detail: r.data.message || r.data.errors || null,
+      });
+    }
+
+    // A member who already has their own Engineers Hub account links it
+    // by signing in to it once. The password goes to his /auth/login in
+    // this one request and is never stored or logged; only the token is.
+    if (action === "sso-link") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      if (!ssoKey()) {
+        return res.status(503).json({ code: "sso_not_configured", error: "Engineers Hub sign-in isn't set up yet." });
+      }
+      const email = String((req.body && req.body.email) || "").trim().toLowerCase();
+      const password = String((req.body && req.body.password) || "");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password) {
+        return res.status(400).json({ error: "Enter the email and password of your Engineers Hub account." });
+      }
+      const r = await hisApi("/auth/login", { method: "POST", body: { email, password, device: SSO_DEVICE_NAME } });
+      if (r.code) return ssoDown(res, r);
+      if (r.status === 429) {
+        return res.status(429).json({ code: "sso_rate_limited", error: "Too many sign-in attempts on Engineers Hub. Try again in a few minutes." });
+      }
+      if (!r.ok || !r.data.token) {
+        return res.status(401).json({ code: "sso_invalid_credentials", error: "Engineers Hub didn't accept that email and password." });
+      }
+      const hisUser = r.data.user || {};
+      const externalId = hisUser.id ? String(hisUser.id) : null;
+      // One Engineers Hub account per member — never let two engineers
+      // here share one identity there.
+      if (externalId) {
+        const [taken] = await sql`
+          SELECT engineer_id FROM sso_identities
+          WHERE provider = 'engineershub' AND external_user_id = ${externalId} AND engineer_id <> ${session.id}
+        `;
+        if (taken) {
+          await hisApi("/auth/logout", { method: "POST", token: r.data.token });
+          return res.status(409).json({ code: "sso_account_taken", error: "That Engineers Hub account is already linked to another member." });
+        }
+      }
+      const expiresAt = new Date(Date.now() + SSO_TOKEN_TTL_MINUTES * 60000);
+      await sql`
+        INSERT INTO sso_identities
+          (engineer_id, provider, external_user_id, external_email, origin, credential_enc, token_enc, token_expires_at, status, last_used_at)
+        VALUES
+          (${session.id}, 'engineershub', ${externalId}, ${email}, 'linked', NULL, ${sealSecret(r.data.token)}, ${expiresAt}, 'linked', NOW())
+        ON CONFLICT (provider, engineer_id) DO UPDATE SET
+          external_user_id = EXCLUDED.external_user_id, external_email = EXCLUDED.external_email,
+          origin = 'linked', credential_enc = NULL, token_enc = EXCLUDED.token_enc,
+          token_expires_at = EXCLUDED.token_expires_at, status = 'linked', last_error = NULL, last_used_at = NOW()
+      `;
+      return res.status(200).json(ssoTokenPayload(r.data.token, expiresAt, "linked"));
+    }
+
+    // Disconnect. The token is revoked on his side too (best effort). An
+    // account we registered keeps its sealed password so a later
+    // sso-login can pick it back up — deleting that would strand an
+    // Engineers Hub account whose password nobody knows.
+    if (action === "sso-unlink") {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST, OPTIONS");
+        return res.status(405).json({ error: "Method not allowed." });
+      }
+      const session = await requireSession(sql, req, res);
+      if (!session) return;
+      const [link] = await sql`
+        SELECT * FROM sso_identities WHERE provider = 'engineershub' AND engineer_id = ${session.id}
+      `;
+      if (!link) return res.status(200).json({ ok: true, linked: false });
+      const token = link.token_enc && ssoKey() ? openSecret(link.token_enc) : null;
+      if (token) await hisApi("/auth/logout", { method: "POST", token });
+      if (link.origin === "registered") {
+        await sql`UPDATE sso_identities SET token_enc = NULL, token_expires_at = NULL, status = 'unlinked', last_used_at = NOW() WHERE id = ${link.id}`;
+      } else {
+        await sql`DELETE FROM sso_identities WHERE id = ${link.id}`;
+      }
+      return res.status(200).json({ ok: true, linked: false });
+    }
+
     return res.status(400).json({
-      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, save-email, support, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import, admin-email-recipients, admin-send-email, admin-send-event-email, admin-email-logs, admin-email-templates, admin-support, admin-support-reply, elections, campaigns, upload-campaign-photo, ballot, vote, election-results, campaign-sms-recipients, campaign-sms, campaign-sms-batch, campaign-sms-dispatch.",
+      error: "Unknown action. Use one of: login, logout, logout-all, me, update-profile, consent, save-email, support, upload-photo, work-experience, education, skills, directory, connections, follows, feed, jobs, profile, dashboard, toggle-open-to-work, conversations, messages, typing, posts, upload-post-image, upload-post-video, react-post, post-reactors, save-post, pin-post, report-post, comments, notifications, admin-login, admin-logout, admin-me, admin-engineers, admin-import, admin-email-recipients, admin-send-email, admin-send-event-email, admin-email-logs, admin-email-templates, admin-support, admin-support-reply, elections, campaigns, upload-campaign-photo, ballot, vote, election-results, campaign-sms-recipients, campaign-sms, campaign-sms-batch, campaign-sms-dispatch, sso-login, sso-link, sso-unlink.",
     });
   } catch (err) {
     return sendError(res, err);

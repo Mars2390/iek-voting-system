@@ -69,6 +69,7 @@ IEK-VOTING-FULL/
 ├── election-shared.js        # Shared voting UI: candidate card, locked vote flow, campaign form modal
 ├── elections.css             # Styles for the three voting pages
 ├── migrations/016_elections.sql  # elections, campaigns, campaign_votes, campaign_sms_* tables
+├── migrations/017_sso.sql        # sso_identities — the bridge to Bismarck's Engineers Hub
 ├── setup.js                  # One-command bootstrap: tables + sync + git push + deploy
 ├── fix-database.js           # Cleanup + clean re-import (see git history for context)
 ├── .env.example             # Template for required env vars (committed)
@@ -321,6 +322,34 @@ Create an election (title, description, positions one per line, optional open/cl
 ### Testing
 
 Same discipline as the rest of Engineer Hub: disposable `TEST.*` engineers against the live Neon database, always deleted afterwards, and the engineer count re-checked. Both suites in the last pass ran green: 85 direct-handler checks (every action, both vote rules, the concurrent-vote race, dispatcher with Sozuri mocked, delivery webhook, admin ops, CSV) and 40 Playwright browser checks (admin creates/verifies/opens/announces through the UI, campaign create/edit, shared link → login → back to the campaign, vote + lock + reload, double-tap firing exactly one request, SMS test send + tracking + schedule + cancel, results + export, mobile layout with no horizontal overflow, Home card, notifications). **No real SMS was sent** — Sozuri was mocked in every test; the first real send should be *Send a test to my phone* from a real campaign.
+
+## 8. SSO bridge to Engineers Hub (Bismarck's Laravel platform)
+
+A member logs in here once (name + membership number + PIN) and can then use the features that live on Bismarck's Laravel platform — marketplace, courses, payments — without a second login. His backend is **never modified and never called from a browser**: our function obtains a Sanctum token on the member's behalf, server to server, keeps it sealed in Neon, and the client calls his API through a same-origin rewrite.
+
+Schema: [`migrations/017_sso.sql`](migrations/017_sso.sql) (`sso_identities`). Backend: the `SSO BRIDGE` section of `api/auth.js` — actions `sso-login`, `sso-link`, `sso-unlink` (no new function files; see [Serverless function count](#serverless-function-count-vercel-hobby-plan-limit-12)). Rewrite: `/api/his-backend/:path*` → `https://www.engineershub.africa/api/v1/:path*` in `vercel.json` — the browser only ever sees our own origin, so his API needs no CORS configuration. Web client: `Hub.his(path, options)` in `hub-common.js`.
+
+### How a member gets an Engineers Hub account
+
+| Origin | How | What we keep |
+|---|---|---|
+| `registered` | First `sso-login` creates one for them via his `POST /auth/register` with a random 43-character password only this backend has seen | the password and the token, both AES-256-GCM sealed with `SSO_CRED_KEY` |
+| `linked` | They already had one — they sign in to it once via `sso-link` | the token only; their password is forwarded to his `/auth/login` in that one request and never stored |
+
+`sso-login` (POST) hands back a valid token: from cache if it has a day or more left, otherwise rotated through his `POST /auth/refresh`, otherwise (registered accounts) re-obtained with the sealed password. GET returns link status with no side effects. Every failure has a stable `code` the clients switch on: `sso_unavailable` / `sso_maintenance` (503 — his platform is down; our own session is untouched and everything else keeps working), `sso_email_required`, `sso_account_exists`, `sso_relink_required`, `sso_account_taken`, `sso_rate_limited`, `sso_not_configured`.
+
+### Environment variables
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `SSO_CRED_KEY` | yes | 64 hex chars (`openssl rand -hex 32`). Seals tokens and passwords at rest. Without it every SSO action answers `503 sso_not_configured` and nothing else changes. **Rotating it invalidates every stored token and password** — registered accounts would need re-registering, so treat it like the database password. |
+| `SSO_BASE_URL` | no | Defaults to `https://www.engineershub.africa/api/v1`. Point it at his staging host for testing. |
+| `SSO_TOKEN_TTL_MINUTES` | no | Defaults to 43200 (30 days), mirroring his `SANCTUM_TOKEN_TTL_MINUTES`. Only `/auth/refresh` reports the real TTL; this is the assumption for register/login. |
+| `SSO_REGISTER_WITH_PHONE` | no | `1` to send the member's phone to his register endpoint. Off by default because his platform then SMSes them a verification code in its own name. |
+
+### Testing
+
+Same discipline as everything else: disposable `TEST.*` engineers against the live Neon database, deleted afterwards, count re-checked at 331. His platform is stood in for by a mock that implements his `AuthController` shapes exactly (`register` → 201 with token, `Email already registered.` → 422, login 401/429, refresh, maintenance-mode 503 with `code: "maintenance"`, and a dead host). The last pass ran 30 checks green: first-use registration, cache hit with no outbound call, refresh rotation, fallback to the sealed password, a changed password marking the link broken and not being retried, `sso-link` with wrong and right passwords, one his-account refusing a second member, the already-registered and no-email cases, down/maintenance answering 503 while our own `me` still works, three concurrent first-use calls producing one row, and unlink/re-link for both origins. **No request touched his real platform.**
 
 ## API Reference
 

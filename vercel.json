@@ -4,6 +4,7 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
+    { "source": "/api/his-backend/:path*", "destination": "https://www.engineershub.africa/api/v1/:path*" },
     { "source": "/api/engineers/:id", "destination": "/api/engineers?id=:id" },
     { "source": "/api/candidates/:id/vote", "destination": "/api/candidates?id=:id&vote=1" },
     { "source": "/api/candidates/:id", "destination": "/api/candidates?id=:id" },

@@ -59,6 +59,7 @@ window.Hub = (function () {
     }).then(function (r) {
       if (r.status === 401) {
         safeStorageRemove(STORAGE_KEY);
+        safeStorageRemove(HIS_TOKEN_KEY);
         window.location.replace("/login.html");
         return new Promise(function () {}); // never resolves; we're navigating away
       }
@@ -400,5 +401,87 @@ window.Hub = (function () {
     }, 2600);
   }
 
-  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox, confirm: confirmDialog, editField: editFieldDialog, storageGet: safeStorageGet, storageSet: safeStorageSet, storageRemove: safeStorageRemove };
+  // ---------- Engineers Hub (Bismarck's Laravel API) via the SSO bridge ----------
+  // The member logged in here once; `sso-login` hands back a token for his
+  // platform, cached in localStorage until a day before it expires. Calls
+  // go to /api/his-backend/<path>, which vercel.json rewrites to his API
+  // server-side — the browser only ever talks to our own origin, so his
+  // missing CORS config never comes into it.
+  //
+  //   Hub.his("/courses").then(...)
+  //   Hub.his("/me/enrollments", { method: "POST", body: {...} })
+  //
+  // Rejections carry `code` so a page can act on it:
+  //   sso_email_required   → send them to add an email (Hub.editField)
+  //   sso_account_exists   → show the "link your Engineers Hub account" form
+  //   sso_relink_required  → same form, with ?force=1 on retry
+  //   sso_unavailable / sso_maintenance / maintenance → show cached/empty state
+  var HIS_TOKEN_KEY = "eh_his_token";
+  var HIS_MIN_REMAINING_MS = 24 * 60 * 60 * 1000;
+  var hisTokenInFlight = null;
+
+  function hisTokenCached() {
+    try {
+      var raw = safeStorageGet(HIS_TOKEN_KEY);
+      if (!raw) return null;
+      var t = JSON.parse(raw);
+      if (!t || !t.token || !t.expiresAt) return null;
+      if (new Date(t.expiresAt).getTime() - Date.now() < HIS_MIN_REMAINING_MS) return null;
+      return t;
+    } catch (e) { return null; }
+  }
+
+  // One in-flight sso-login at a time: a page that fires three his() calls
+  // on load must not trigger three registrations/refreshes in a row.
+  function hisToken(force) {
+    var cached = force ? null : hisTokenCached();
+    if (cached) return Promise.resolve(cached);
+    if (hisTokenInFlight) return hisTokenInFlight;
+    hisTokenInFlight = api("sso-login", { method: "POST", query: force ? { force: "1" } : {} })
+      .then(function (t) {
+        safeStorageSet(HIS_TOKEN_KEY, JSON.stringify({ token: t.token, expiresAt: t.expiresAt }));
+        return t;
+      })
+      .catch(function (err) {
+        // api() throws with .data = the JSON body; surface its code.
+        if (err && err.data && err.data.code) err.code = err.data.code;
+        throw err;
+      })
+      .finally(function () { hisTokenInFlight = null; });
+    return hisTokenInFlight;
+  }
+
+  function clearHisToken() { safeStorageRemove(HIS_TOKEN_KEY); }
+
+  function his(path, options) {
+    options = options || {};
+    var qs = options.query ? "?" + new URLSearchParams(options.query).toString() : "";
+    return hisToken(!!options._force).then(function (t) {
+      var headers = Object.assign({ Accept: "application/json", Authorization: "Bearer " + t.token }, options.headers || {});
+      var body = options.body;
+      if (body && typeof body === "object" && !(body instanceof FormData)) {
+        headers["Content-Type"] = "application/json";
+        body = JSON.stringify(body);
+      }
+      return fetch("/api/his-backend" + path + qs, { method: options.method || "GET", headers: headers, body: body });
+    }).then(function (r) {
+      // His side no longer accepts the token: get a fresh one, once.
+      if (r.status === 401 && !options._retried) {
+        clearHisToken();
+        return his(path, Object.assign({}, options, { _retried: true, _force: true }));
+      }
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) {
+          var err = new Error(data.message || data.error || "Engineers Hub request failed");
+          err.status = r.status;
+          err.data = data;
+          err.code = data.code || (r.status === 503 ? "sso_unavailable" : null);
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  return { token: token, requireAuth: requireAuth, api: api, escapeHtml: escapeHtml, initials: initials, avatarHtml: avatarHtml, timeAgo: timeAgo, toast: toast, compressImage: compressImage, openLightbox: openLightbox, confirm: confirmDialog, editField: editFieldDialog, storageGet: safeStorageGet, storageSet: safeStorageSet, storageRemove: safeStorageRemove, his: his, hisToken: hisToken, clearHisToken: clearHisToken };
 })();
